@@ -282,28 +282,6 @@ export function timeline(rows: Row[], gran: Granularity): Timeline {
 export const hasSolvedDates = (points: TimelinePoint[]): boolean =>
   points.some((p) => p.solved > 0);
 
-export type BacklogPoint = TimelinePoint & {
-  cumulativeReported: number;
-  cumulativeSolved: number;
-  open: number;
-};
-
-/** Running totals — the gap between the two lines is the open backlog. */
-export function backlog(points: TimelinePoint[]): BacklogPoint[] {
-  let reported = 0;
-  let solved = 0;
-  return points.map((p) => {
-    reported += p.reported;
-    solved += p.solved;
-    return {
-      ...p,
-      cumulativeReported: reported,
-      cumulativeSolved: solved,
-      open: reported - solved,
-    };
-  });
-}
-
 // ---------------------------------------------------------------- tallies
 
 export type Slice = { name: string; value: number };
@@ -416,54 +394,6 @@ function countInto<T extends string>(
   return out;
 }
 
-// ---------------------------------------------------------------- distributions
-
-/**
- * Days-to-resolve, bucketed. Fixed edges rather than a computed histogram so the
- * bands mean the same thing whatever the filter says.
- */
-export const RESOLUTION_BANDS = [
-  { name: "same day", min: 0, max: 0 },
-  { name: "1–2 d", min: 1, max: 2 },
-  { name: "3–7 d", min: 3, max: 7 },
-  { name: "8–14 d", min: 8, max: 14 },
-  { name: "15–30 d", min: 15, max: 30 },
-  { name: "30 d +", min: 31, max: Number.POSITIVE_INFINITY },
-] as const;
-
-export const AGE_BANDS = [
-  { name: "0–7 d", min: 0, max: 7 },
-  { name: "8–30 d", min: 8, max: 30 },
-  { name: "31–90 d", min: 31, max: 90 },
-  { name: "90 d +", min: 91, max: Number.POSITIVE_INFINITY },
-] as const;
-
-export function bandCounts(
-  values: number[],
-  bands: readonly { name: string; min: number; max: number }[],
-): Slice[] {
-  return bands.map((band) => ({
-    name: band.name,
-    value: values.filter((v) => v >= band.min && v <= band.max).length,
-  }));
-}
-
-export function resolutionDistribution(rows: Row[]): Slice[] {
-  return bandCounts(
-    rows.map((r) => r.resolutionDays).filter((n): n is number => n !== null),
-    RESOLUTION_BANDS,
-  );
-}
-
-/** Age of everything still open, measured from the day it was raised. */
-export function ageDistribution(rows: Row[], today: string): Slice[] {
-  const ages = rows
-    .filter((r) => r.isOpen)
-    .map((r) => daysBetween(r.date, today))
-    .filter((n): n is number => n !== null);
-  return bandCounts(ages, AGE_BANDS);
-}
-
 export function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -518,9 +448,25 @@ export type Kpis = {
   notResolved: number;
   notRetested: number;
   /**
+   * Rows that actually carry a retest verdict — `Resolved` plus
+   * `Tested but Not Resolved`. This is the denominator of the pass rate: it
+   * answers "of the defects we re-tested, how many came back resolved", which
+   * is a statement about the fixes rather than about how far the retest round
+   * has got. Rows nobody has re-tested are counted by {@link Kpis.notRetested}
+   * and reported beside the rate, never folded into it.
+   */
+  retested: number;
+  /**
+   * Rows the tracker settles as not a defect at all — either the status or the
+   * retest verdict says so. They are excluded from the funnel's denominator,
+   * because there was never anything to fix.
+   */
+  noDefect: number;
+  /** Everything that was a real defect: {@link Kpis.total} less the above. */
+  realDefects: number;
+  /**
    * Everything not confirmed fixed: an explicit "Tested but Not Resolved" plus
-   * every row nobody has re-tested at all. A defect no one has re-tested is not
-   * resolved either, so counting only the explicit failures flatters the number.
+   * every row nobody has re-tested at all.
    */
   stillToResolve: number;
   medianResolution: number | null;
@@ -556,6 +502,10 @@ export function kpis(rows: Row[]): Kpis {
     resolved: rows.filter((r) => r.retest === "Resolved").length,
     notResolved: rows.filter((r) => r.retest === "Tested but Not Resolved").length,
     notRetested: rows.filter((r) => r.retest === "Not retested").length,
+    retested: rows.filter((r) => r.retest === "Resolved" || r.retest === "Tested but Not Resolved")
+      .length,
+    noDefect: rows.filter((r) => r.status === "No defect" || r.retest === "No defect").length,
+    realDefects: rows.filter((r) => r.status !== "No defect" && r.retest !== "No defect").length,
     stillToResolve: rows.filter(
       (r) => r.retest === "Tested but Not Resolved" || r.retest === "Not retested",
     ).length,

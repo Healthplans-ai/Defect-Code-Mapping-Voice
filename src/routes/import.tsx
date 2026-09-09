@@ -23,7 +23,7 @@ export const Route = createFileRoute("/import")({
       {
         name: "description",
         content:
-          "Upload the defect tracker as .xlsx. Existing rows are kept, changed statuses are updated and only genuinely new defects are added.",
+          "Upload the defect tracker as .xlsx. Existing rows are kept, changed statuses are updated and only genuinely new defects are added — or declare the sheet the whole tracker and the map ends up matching it exactly.",
       },
     ],
   }),
@@ -35,6 +35,7 @@ const OUTCOME_LABEL: Record<ImportOutcome, string> = {
   updated: "Updated",
   unchanged: "Unchanged",
   invalid: "Skipped",
+  removed: "Removed",
 };
 
 const OUTCOME_STYLE: Record<ImportOutcome, string> = {
@@ -42,6 +43,7 @@ const OUTCOME_STYLE: Record<ImportOutcome, string> = {
   updated: "bg-warn text-foreground",
   unchanged: "bg-muted text-muted-foreground",
   invalid: "bg-destructive text-destructive-foreground",
+  removed: "bg-destructive text-destructive-foreground",
 };
 
 function ImportPage() {
@@ -57,10 +59,19 @@ function ImportPage() {
   const [report, setReport] = useState<ImportReport | null>(null);
   const [dragging, setDragging] = useState(false);
   const [filter, setFilter] = useState<ImportOutcome | "all">("all");
+  /**
+   * Is this upload the whole tracker, or a slice of it?
+   *
+   * Off by default, because a partial upload must never delete anything. On, a
+   * row the store holds and the sheet does not is treated as stale and dropped
+   * — which is the only way the totals on the analysis page can ever equal the
+   * spreadsheet's own after rows get renumbered or removed upstream.
+   */
+  const [pruneMissing, setPruneMissing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const preview = useMutation({
-    mutationFn: (f: File) => previewImport(f),
+    mutationFn: (f: File) => previewImport(f, { pruneMissing }),
     onSuccess: (r) => {
       setReport(r);
       setFilter(r.totals.new > 0 ? "new" : r.totals.updated > 0 ? "updated" : "all");
@@ -72,7 +83,7 @@ function ImportPage() {
   });
 
   const commit = useMutation({
-    mutationFn: (f: File) => commitImport(f),
+    mutationFn: (f: File) => commitImport(f, { pruneMissing }),
     onSuccess: ({ report: r, store: fresh }) => {
       queryClient.setQueryData(DEFECT_STORE_KEY, fresh);
       void queryClient.invalidateQueries({ queryKey: DEFECT_STORE_KEY });
@@ -102,7 +113,7 @@ function ImportPage() {
 
   const items = useMemo(() => {
     if (!report) return [];
-    const order: ImportOutcome[] = ["invalid", "new", "updated", "unchanged"];
+    const order: ImportOutcome[] = ["invalid", "removed", "new", "updated", "unchanged"];
     return [...report.items]
       .filter((i) => filter === "all" || i.outcome === filter)
       .sort(
@@ -219,6 +230,32 @@ function ImportPage() {
           </div>
         </div>
 
+        {/*
+          The one decision the uploader has to make, put where the file is
+          picked rather than buried next to the commit button — it changes what
+          the preview below is a preview of.
+        */}
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-card p-4">
+          <input
+            type="checkbox"
+            checked={pruneMissing}
+            disabled={busy}
+            onChange={(e) => {
+              setPruneMissing(e.target.checked);
+              if (file) preview.mutate(file);
+            }}
+            className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]"
+          />
+          <span className="text-sm">
+            <span className="font-display font-semibold">This sheet is the whole tracker</span>
+            <span className="mt-0.5 block text-muted-foreground">
+              Rows the store holds and this sheet does not are dropped, so the map ends up with
+              exactly the sheet's rows. Leave it off for a partial upload — then nothing is ever
+              deleted. Either way the preview below lists every row before anything is saved.
+            </span>
+          </span>
+        </label>
+
         {preview.isPending && (
           <p className="mt-6 text-sm text-muted-foreground">Reading the workbook…</p>
         )}
@@ -234,7 +271,7 @@ function ImportPage() {
 
         {report && (
           <>
-            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
               <Tile label="Rows in sheet" value={report.totals.sheetRows} />
               <Tile label="New" value={report.totals.new} tone="accent" />
               <Tile label="Updated" value={report.totals.updated} tone="warn" />
@@ -244,15 +281,32 @@ function ImportPage() {
                 value={report.totals.invalid}
                 tone={report.totals.invalid ? "destructive" : undefined}
               />
+              {pruneMissing ? (
+                <Tile
+                  label="Removed"
+                  value={report.totals.removed}
+                  tone={report.totals.removed ? "destructive" : undefined}
+                />
+              ) : null}
               <Tile label="Store after" value={report.totals.storeTotalAfter} tone="primary" />
             </div>
 
             <p className="mt-3 text-sm text-muted-foreground">
               {report.totals.statusChanged} row
               {report.totals.statusChanged === 1 ? "" : "s"} changed status or retest.{" "}
-              {report.totals.keptUntouched} row
-              {report.totals.keptUntouched === 1 ? "" : "s"} already in the store were not in this
-              sheet and are left untouched.
+              {pruneMissing ? (
+                <>
+                  {report.totals.removed} row
+                  {report.totals.removed === 1 ? "" : "s"} already in the store are not in this
+                  sheet and will be removed.
+                </>
+              ) : (
+                <>
+                  {report.totals.keptUntouched} row
+                  {report.totals.keptUntouched === 1 ? "" : "s"} already in the store were not in
+                  this sheet and are left untouched.
+                </>
+              )}
               {report.committed ? " Applied and saved to Azure Blob." : " Nothing saved yet."}
             </p>
 
@@ -297,7 +351,7 @@ function ImportPage() {
 
             {/* Row-level detail */}
             <div className="mt-8 flex flex-wrap gap-2">
-              {(["all", "new", "updated", "unchanged", "invalid"] as const).map((f) => (
+              {(["all", "new", "updated", "unchanged", "invalid", "removed"] as const).map((f) => (
                 <button
                   key={f}
                   type="button"

@@ -44,20 +44,6 @@ export const REPORTED_SERIES: Series[] = [
   { key: "solved", name: "Marked solved", color: "var(--series-2)", mark: "rect" },
 ];
 
-export const BACKLOG_SERIES: Series[] = [
-  { key: "open", name: "Still open", color: "var(--series-3)", mark: "rect" },
-  { key: "cumulativeReported", name: "Raised to date", color: "var(--series-1)", mark: "line" },
-  { key: "cumulativeSolved", name: "Solved to date", color: "var(--series-2)", mark: "line" },
-];
-
-/** Ordinal steps for ordered bands (days-to-resolve, age of the open queue). */
-export const ORDINAL_STEPS = [
-  "var(--seq-250)",
-  "var(--seq-350)",
-  "var(--seq-450)",
-  "var(--seq-550)",
-];
-
 /**
  * Discrete steps of the one sequential hue, for the heatmap.
  *

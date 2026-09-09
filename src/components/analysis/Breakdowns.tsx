@@ -55,26 +55,29 @@ export function ComponentStacks({
                 ) : null}
               </span>
             </div>
-            <div
-              className="mt-1 flex h-2.5 gap-0.5"
-              style={{ width: `${Math.max(3, (c.total / max) * 100)}%` }}
-            >
-              {segments.map((s, i) => (
-                <div
-                  key={s}
-                  className={cn(
-                    "h-2.5",
-                    i === segments.length - 1 && "rounded-r-[4px]",
-                    i === 0 && "rounded-l-[1px]",
-                  )}
-                  style={{
-                    flexGrow: c.byStatus[s],
-                    flexBasis: 0,
-                    background: STATUS_COLOR[s],
-                  }}
-                  title={`${c.label} · ${s}: ${c.byStatus[s]}`}
-                />
-              ))}
+            {/* Track first, so a short component still reads against the full scale. */}
+            <div className="mt-1 h-3 w-full rounded-full bg-muted/70">
+              <div
+                className="flex h-3 gap-0.5 transition-[width] duration-500"
+                style={{ width: `${Math.max(3, (c.total / max) * 100)}%` }}
+              >
+                {segments.map((s, i) => (
+                  <div
+                    key={s}
+                    className={cn(
+                      "h-3",
+                      i === segments.length - 1 && "rounded-r-full",
+                      i === 0 && "rounded-l-full",
+                    )}
+                    style={{
+                      flexGrow: c.byStatus[s],
+                      flexBasis: 0,
+                      background: STATUS_COLOR[s],
+                    }}
+                    title={`${c.label} · ${s}: ${c.byStatus[s]}`}
+                  />
+                ))}
+              </div>
             </div>
           </>
         );

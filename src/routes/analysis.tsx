@@ -6,48 +6,42 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDefectStore } from "@/hooks/useDefectStore";
 import { StoreEmpty, StoreError, StoreLoading } from "@/components/StoreState";
-import { BandChart, BacklogChart, ReportedVsSolved } from "@/components/analysis/TimeCharts";
+import { ReportedVsSolved } from "@/components/analysis/TimeCharts";
+import {
+  Donut,
+  RankedBars,
+  StageFunnel,
+  WeekdayRadar,
+  type Stage,
+} from "@/components/analysis/Figures";
 import { ComponentStacks, DefectTable } from "@/components/analysis/Breakdowns";
 import { FilterBar } from "@/components/analysis/FilterBar";
 import {
-  BarList,
   Heatmap,
   Legend,
   Panel,
   SequentialScaleLegend,
   SimpleTable,
-  SplitBar,
   StatTile,
   SliceTable,
 } from "@/components/analysis/primitives";
+import { REPORTED_SERIES, RETEST_COLOR, STATUS_COLOR } from "@/components/analysis/palette";
 import {
-  BACKLOG_SERIES,
-  CONFIDENCE_COLOR,
-  REPORTED_SERIES,
-  RETEST_COLOR,
-  STATUS_COLOR,
-} from "@/components/analysis/palette";
-import {
-  ageDistribution,
   applyFilters,
-  backlog,
   buildRows,
   componentBreakdown,
   componentMatrix,
-  CONFIDENCE_ORDER,
   EMPTY_FILTERS,
   hasSolvedDates,
   kpis,
   MAX_TIMELINE_BUCKETS,
   RETEST_ORDER,
-  resolutionDistribution,
   STATUS_ORDER,
   tally,
   tallyMany,
   tallyOrdered,
   timeline,
   toCsv,
-  todayIso,
   UNMAPPED_KEY,
   withOther,
   type Filters,
@@ -61,7 +55,7 @@ export const Route = createFileRoute("/analysis")({
       {
         name: "description",
         content:
-          "Cut the voice-agent defect tracker by date, component, category, status, retest verdict and the code each fix touched.",
+          "Cut the voice-agent defect tracker by date, component, category, status and retest verdict.",
       },
     ],
   }),
@@ -121,7 +115,6 @@ function AnalysisPage() {
 
   const stats = useMemo(() => kpis(rows), [rows]);
   const { points, truncated } = useMemo(() => timeline(rows, granularity), [rows, granularity]);
-  const cumulative = useMemo(() => backlog(points), [points]);
   // Nothing in the sheet marks a fix date? Then there is no solved series to draw.
   const withSolved = hasSolvedDates(points);
   const breakdown = useMemo(
@@ -135,10 +128,6 @@ function AnalysisPage() {
 
   const byStatus = useMemo(() => tallyOrdered(rows, STATUS_ORDER, (r) => r.status), [rows]);
   const byRetest = useMemo(() => tallyOrdered(rows, RETEST_ORDER, (r) => r.retest), [rows]);
-  const byConfidence = useMemo(
-    () => tallyOrdered(rows, CONFIDENCE_ORDER, (r) => r.confidenceBucket),
-    [rows],
-  );
   const byCategory = useMemo(() => tally(rows, (r) => r.category || "Uncategorised"), [rows]);
   const byWeekday = useMemo(() => {
     const counts = tally(rows, (r) => weekdayOf(r.date));
@@ -148,22 +137,6 @@ function AnalysisPage() {
     })).filter((d, _i, list) => list.some((x) => x.value > 0));
   }, [rows]);
 
-  const hotspots = useMemo(
-    () =>
-      withOther(
-        tallyMany(rows, (r) => r.files),
-        12,
-      ),
-    [rows],
-  );
-  const batches = useMemo(
-    () =>
-      withOther(
-        tallyMany(rows, (r) => r.batches),
-        10,
-      ),
-    [rows],
-  );
   const alsoTouched = useMemo(() => {
     const names = new Map(store.components.map((c) => [c.id, c.name]));
     return tallyMany(rows, (r) =>
@@ -178,11 +151,52 @@ function AnalysisPage() {
       ),
     [rows],
   );
-  const byTeam = useMemo(() => tally(rows, (r) => r.team), [rows]);
-  const byPhase = useMemo(() => tally(rows, (r) => r.phase), [rows]);
 
-  const resolution = useMemo(() => resolutionDistribution(rows), [rows]);
-  const ages = useMemo(() => ageDistribution(rows, todayIso()), [rows]);
+  /**
+   * The retest read, in one place so the tile, the donut and the funnel cannot
+   * drift apart.
+   *
+   * The rate is against the rows that actually carry a verdict — resolved plus
+   * tested-and-still-broken. It answers "of what we re-tested, how much came
+   * back fixed", which is a claim about the fixes. Rows nobody has re-tested
+   * are not evidence either way, so they are reported beside the rate rather
+   * than dragging it down as if they had failed.
+   */
+  const pass = {
+    rate: pct(stats.resolved, stats.retested),
+    resolved: stats.resolved,
+    retested: stats.retested,
+    failed: stats.notResolved,
+    notRetested: stats.notRetested,
+  };
+
+  /**
+   * A strictly nested cohort, so every step is the previous one minus a named
+   * drop rather than four independent counts on the same scale. "No defect"
+   * rows leave at the first step: there was nothing to fix, so keeping them in
+   * the denominator would understate the pass rate.
+   */
+  const funnel: Stage[] = [
+    { name: "Raised", value: stats.total, color: "var(--seq-250)" },
+    {
+      name: "Real defects",
+      value: stats.realDefects,
+      color: "var(--seq-350)",
+      dropLabel: "settled as no defect",
+    },
+    {
+      name: "Re-tested",
+      value: stats.retested,
+      color: "var(--seq-550)",
+      dropLabel: "not re-tested yet",
+    },
+    {
+      name: "Resolved on retest",
+      value: stats.resolved,
+      color: "var(--seq-700)",
+      dropLabel: "came back still broken",
+    },
+  ];
 
   /**
    * Which optional tracker columns this data actually carries, measured over the
@@ -193,24 +207,15 @@ function AnalysisPage() {
   const carries = useMemo(
     () => ({
       testedBy: allRows.some((r) => r.testedBy !== ""),
-      team: allRows.some((r) => r.team !== ""),
-      phase: allRows.some((r) => r.phase !== ""),
-      batches: allRows.some((r) => r.batches.length > 0),
-      files: allRows.some((r) => r.files.length > 0),
       alsoTouches: allRows.some((r) => r.alsoTouchesIds.length > 0),
-      solvedOn: allRows.some((r) => r.solvedOn !== ""),
     }),
     [allRows],
   );
 
   const missingColumns = (
     [
-      ["Solved on", carries.solvedOn],
       ["Also Touches", carries.alsoTouches],
-      ["Fix Batch", carries.batches],
       ["Tested By", carries.testedBy],
-      ["Team", carries.team],
-      ["Phase", carries.phase],
     ] as const
   )
     .filter(([, present]) => !present)
@@ -267,7 +272,7 @@ function AnalysisPage() {
             </h1>
             <p className="mt-2 max-w-3xl text-muted-foreground">
               Every panel below reads the same slice — set the filters once and the timeline, the
-              component split, the code hotspots and the row table all move together.
+              component split, the category ranking and the row table all move together.
             </p>
           </div>
           {rows.length > 0 ? (
@@ -319,7 +324,7 @@ function AnalysisPage() {
               className="transition-opacity duration-200"
               style={{ opacity: isFetching ? 0.55 : 1 }}
             >
-              <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+              <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
                 <StatTile
                   label="Rows in scope"
                   value={String(stats.total)}
@@ -343,25 +348,22 @@ function AnalysisPage() {
                   tone={stats.blocked > 0 ? "critical" : "warning"}
                 />
                 {/*
-                  Share is against the rows that have a verdict either way, and
-                  the hint counts everything not confirmed fixed — an explicit
-                  "Tested but Not Resolved" plus every row nobody re-tested,
-                  since neither is resolved. "No defect" rows are excluded from
-                  both: there was nothing to resolve.
+                  Of the rows that were actually re-tested, how many came back
+                  resolved. Rows nobody has re-tested carry no verdict, so they
+                  sit in the hint rather than in the denominator.
                 */}
                 <StatTile
                   label="Retested & resolved"
-                  value={pct(stats.resolved, stats.resolved + stats.stillToResolve)}
+                  value={pass.rate}
                   hint={
-                    stats.stillToResolve === 0
-                      ? `all ${stats.resolved} confirmed fixed`
-                      : `${stats.stillToResolve} still to resolve (${stats.notResolved} failed, ${stats.notRetested} not retested)`
+                    pass.retested === 0
+                      ? "no row has been re-tested yet"
+                      : `${pass.resolved} of ${pass.retested} retested rows passed${
+                          pass.failed > 0 ? ` · ${pass.failed} failed` : ""
+                        }${pass.notRetested > 0 ? ` · ${pass.notRetested} not retested` : ""}`
                   }
-                  tone={stats.stillToResolve > 0 ? "warning" : "good"}
-                  share={{
-                    part: stats.resolved,
-                    whole: stats.resolved + stats.stillToResolve,
-                  }}
+                  tone={pass.failed > 0 ? "warning" : "good"}
+                  share={{ part: pass.resolved, whole: pass.retested }}
                 />
                 <StatTile
                   label="Median time to fix"
@@ -372,11 +374,6 @@ function AnalysisPage() {
                       : `p90 ${days(stats.p90Resolution)} · ${stats.measured} measured`
                   }
                 />
-                <StatTile
-                  label="Code files touched"
-                  value={String(stats.files)}
-                  hint={`${stats.mapped} rows mapped · ${stats.unmapped} unmapped`}
-                />
               </dl>
 
               <Tabs defaultValue="overview" className="mt-8">
@@ -384,14 +381,60 @@ function AnalysisPage() {
                   <TabsTrigger value="overview">Overview</TabsTrigger>
                   <TabsTrigger value="dates">Dates</TabsTrigger>
                   <TabsTrigger value="components">Components</TabsTrigger>
-                  <TabsTrigger value="defects">Defects & code</TabsTrigger>
                   <TabsTrigger value="rows">Rows</TabsTrigger>
                 </TabsList>
 
                 {/* ---------------------------------------------------- overview */}
                 <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-3">
                   <Panel
-                    className="lg:col-span-2"
+                    title="Status split"
+                    subtitle="Lifecycle status as the tracker records it."
+                    table={<SliceTable data={byStatus} label={"Status"} />}
+                  >
+                    <Donut
+                      data={byStatus}
+                      colors={STATUS_COLOR}
+                      centerValue={String(stats.total)}
+                      centerLabel="rows in scope"
+                    />
+                  </Panel>
+
+                  <Panel
+                    title="Retest outcome"
+                    subtitle="The ring is every row; the number is the pass rate over the rows that carry a verdict."
+                    table={<SliceTable data={byRetest} label={"Retest"} />}
+                  >
+                    <Donut
+                      data={byRetest}
+                      colors={RETEST_COLOR}
+                      centerValue={pass.rate}
+                      centerLabel={
+                        pass.retested === 0
+                          ? "nothing re-tested"
+                          : `of ${pass.retested} re-tested rows resolved`
+                      }
+                    />
+                  </Panel>
+
+                  <Panel
+                    title="From raised to resolved"
+                    subtitle="Each step is the one above it, less the rows named underneath."
+                    table={
+                      <SimpleTable
+                        head={["Stage", "Rows", "% of raised"]}
+                        rows={funnel.map((s) => [
+                          s.name,
+                          s.value,
+                          pct(s.value, funnel[0]?.value ?? 0),
+                        ])}
+                      />
+                    }
+                  >
+                    <StageFunnel stages={funnel} />
+                  </Panel>
+
+                  <Panel
+                    className="lg:col-span-3"
                     title={withSolved ? "Raised vs marked solved" : "Defects raised"}
                     subtitle={solvedSubtitle(granularity, withSolved, truncated)}
                     legend={
@@ -408,27 +451,18 @@ function AnalysisPage() {
                   </Panel>
 
                   <Panel
-                    title="Status split"
-                    subtitle="Lifecycle status as the tracker records it."
-                    table={<SliceTable data={byStatus} label={"Status"} />}
-                  >
-                    <SplitBar data={byStatus} colors={STATUS_COLOR} />
-                  </Panel>
-
-                  <Panel
-                    className="lg:col-span-2"
-                    title="Defects per component"
-                    subtitle="Click a component to filter the whole page to it."
+                    className="lg:col-span-3"
+                    title="Defects per component, by status"
+                    subtitle="Sorted by row count. Click a component to filter the whole page to it."
                     legend={statusLegend}
                     table={
                       <SimpleTable
-                        head={["Component", "Rows", "Open", "Resolved", "Verified"]}
+                        head={["Component", "Rows", "Open", "Resolved on retest"]}
                         rows={breakdown.map((c) => [
                           `${c.label} ${c.name}`,
                           c.total,
                           c.open,
                           c.resolved,
-                          c.verified,
                         ])}
                       />
                     }
@@ -441,24 +475,16 @@ function AnalysisPage() {
                   </Panel>
 
                   <Panel
-                    title="Retest verdict"
-                    subtitle="Tracked separately from status."
-                    table={<SliceTable data={byRetest} label={"Retest"} />}
-                  >
-                    <SplitBar data={byRetest} colors={RETEST_COLOR} />
-                  </Panel>
-
-                  <Panel
                     className="lg:col-span-3"
                     title="Defects by category"
-                    subtitle="What kind of failure it was. Click a bar to filter."
+                    subtitle="What kind of failure it was. Click a bar to filter the page to that category."
                     table={<SliceTable data={byCategory} label={"Category"} />}
                   >
-                    <BarList
+                    <RankedBars
                       data={byCategory}
-                      total={stats.total}
                       onSelect={toggleCategory}
                       selected={filters.categories}
+                      labelWidth={212}
                     />
                   </Panel>
                 </TabsContent>
@@ -483,62 +509,33 @@ function AnalysisPage() {
                   </Panel>
 
                   <Panel
-                    className="lg:col-span-2"
-                    title="Backlog to date"
-                    subtitle={
-                      withSolved
-                        ? "Running totals. The shaded band is what was still open at the end of each period."
-                        : "Running total of rows raised. With no Solved on dates in this slice the backlog and the raised total are the same line."
-                    }
-                    legend={
-                      withSolved ? <Legend items={BACKLOG_SERIES.map(toLegend)} /> : undefined
-                    }
-                    table={
-                      <SimpleTable
-                        head={[granularity, "Raised to date", "Solved to date", "Open"]}
-                        rows={cumulative.map((p) => [
-                          p.label,
-                          p.cumulativeReported,
-                          p.cumulativeSolved,
-                          p.open,
-                        ])}
-                      />
-                    }
+                    title="Which weekday defects land on"
+                    subtitle="Testing rhythm, not defect severity. The week closes on itself, so the shape reads round rather than left-to-right."
+                    table={<SliceTable data={byWeekday} label={"Weekday"} />}
                   >
-                    <BacklogChart data={cumulative} />
+                    <WeekdayRadar data={byWeekday} />
                   </Panel>
 
-                  {carries.solvedOn ? (
+                  {carries.testedBy ? (
                     <Panel
-                      title="Time from raised to solved"
-                      subtitle={
-                        stats.measured === 0
-                          ? "Needs both a Date and a Solved on value — no row in this slice has both."
-                          : `${stats.measured} rows carry both dates · median ${days(stats.medianResolution)}, p90 ${days(stats.p90Resolution)}.`
-                      }
-                      table={<SliceTable data={resolution} label={"Band"} />}
+                      title="Who found it"
+                      subtitle="From the Tested By column."
+                      table={<SliceTable data={byTester} label={"Tester"} />}
                     >
-                      <BandChart data={resolution} unitLabel="rows" />
+                      <RankedBars data={byTester} unitLabel="defects found" labelWidth={140} />
                     </Panel>
                   ) : null}
 
-                  <Panel
-                    className={carries.solvedOn ? undefined : "lg:col-span-2"}
-                    title="Age of the open queue"
-                    subtitle={`How long the ${stats.open} WIP and blocked rows have been open, counted from today.`}
-                    table={<SliceTable data={ages} label={"Age"} />}
-                  >
-                    <BandChart data={ages} unitLabel="open rows" />
-                  </Panel>
-
-                  <Panel
-                    className="lg:col-span-2"
-                    title="Which weekday defects land on"
-                    subtitle="Testing rhythm, not defect severity — useful for spotting the days a UAT round ran."
-                    table={<SliceTable data={byWeekday} label={"Weekday"} />}
-                  >
-                    <BarList data={byWeekday} total={stats.total} />
-                  </Panel>
+                  {missingColumns.length > 0 ? (
+                    <p className="rounded-2xl border border-dashed border-border px-4 py-3 text-xs text-muted-foreground lg:col-span-2">
+                      No row in the store fills in{" "}
+                      <span className="font-medium text-foreground">
+                        {missingColumns.join(", ")}
+                      </span>
+                      , so the panels that read those columns are not shown. Add them to the tracker
+                      sheet and upload it again to light them up.
+                    </p>
+                  ) : null}
                 </TabsContent>
 
                 {/* -------------------------------------------------- components */}
@@ -598,105 +595,31 @@ function AnalysisPage() {
 
                   {carries.alsoTouches ? (
                     <Panel
+                      className="lg:col-span-2"
                       title="Components a fix also touched"
                       subtitle="From the Also Touches column — where a defect's blast radius crossed a boundary."
                       table={<SliceTable data={alsoTouched} label={"Component"} />}
                     >
-                      <BarList data={alsoTouched} total={stats.total} />
+                      <RankedBars data={alsoTouched} labelWidth={212} />
                     </Panel>
                   ) : null}
 
                   <Panel
-                    className={carries.alsoTouches ? undefined : "lg:col-span-2"}
+                    className="lg:col-span-2"
                     title="Per-component detail"
-                    subtitle="Open count, retest verdict and how much of the mapping is code-verified."
+                    subtitle="Row count, what is still open and how the retest came back."
                   >
                     <SimpleTable
-                      head={["Component", "Rows", "Open", "Resolved", "Verified", "Median fix"]}
+                      head={["Component", "Rows", "Open", "Resolved on retest", "Median fix"]}
                       rows={breakdown.map((c) => [
                         `${c.label} ${c.name}`,
                         c.total,
                         c.open,
                         c.resolved,
-                        c.verified,
                         c.medianResolution === null ? "—" : `${c.medianResolution} d`,
                       ])}
                     />
                   </Panel>
-                </TabsContent>
-
-                {/* ---------------------------------------------- defects & code */}
-                <TabsContent value="defects" className="mt-4 grid gap-4 lg:grid-cols-2">
-                  {carries.files ? (
-                    <Panel
-                      className="lg:col-span-2"
-                      title="Code hotspots"
-                      subtitle="Files named in the Code References column, counted by how many defects touched them."
-                      table={<SliceTable data={hotspots} label={"File"} />}
-                    >
-                      <BarList data={hotspots} total={stats.total} monoLabels />
-                    </Panel>
-                  ) : null}
-
-                  <Panel
-                    title="Mapping confidence"
-                    subtitle="Verified means the code carries the marker; inferred was read from the code plus the tracker note."
-                    table={<SliceTable data={byConfidence} label={"Confidence"} />}
-                  >
-                    <SplitBar data={byConfidence} colors={CONFIDENCE_COLOR} />
-                  </Panel>
-
-                  {carries.batches ? (
-                    <Panel
-                      title="Fix batches"
-                      subtitle="Which build carried the fix."
-                      table={<SliceTable data={batches} label={"Batch"} />}
-                    >
-                      <BarList data={batches} total={stats.total} monoLabels />
-                    </Panel>
-                  ) : null}
-
-                  {carries.testedBy ? (
-                    <Panel
-                      title="Who found it"
-                      subtitle="From the Tested By column."
-                      table={<SliceTable data={byTester} label={"Tester"} />}
-                    >
-                      <BarList data={byTester} total={stats.total} />
-                    </Panel>
-                  ) : null}
-
-                  {carries.team ? (
-                    <Panel
-                      title="Team"
-                      subtitle="From the Team column."
-                      table={<SliceTable data={byTeam} label={"Team"} />}
-                    >
-                      <BarList data={byTeam} total={stats.total} />
-                    </Panel>
-                  ) : null}
-
-                  {carries.phase ? (
-                    <Panel
-                      className="lg:col-span-2"
-                      title="Phase"
-                      subtitle="From the Phase column."
-                      table={<SliceTable data={byPhase} label={"Phase"} />}
-                    >
-                      <BarList data={byPhase} total={stats.total} />
-                    </Panel>
-                  ) : null}
-
-                  {missingColumns.length > 0 ? (
-                    <p className="rounded-2xl border border-dashed border-border px-4 py-3 text-xs text-muted-foreground lg:col-span-2">
-                      No row in the store fills in{" "}
-                      <span className="font-medium text-foreground">
-                        {missingColumns.join(", ")}
-                      </span>
-                      , so the panels that read those columns are not shown. Add them to the tracker
-                      sheet and upload it again to light them up.
-                    </p>
-                  ) : null}
                 </TabsContent>
 
                 {/* -------------------------------------------------------- rows */}

@@ -107,7 +107,7 @@ export type Summary = {
   byComponent: { id: number; name: string; count: number }[];
 };
 
-export type ImportOutcome = "new" | "updated" | "unchanged" | "invalid";
+export type ImportOutcome = "new" | "updated" | "unchanged" | "invalid" | "removed";
 
 export type ImportItem = {
   defectId: string;
@@ -139,6 +139,7 @@ export type ImportReport = {
     invalid: number;
     statusChanged: number;
     keptUntouched: number;
+    removed: number;
     storeTotalAfter: number;
   };
   items: ImportItem[];
@@ -201,28 +202,43 @@ export const fetchStore = () => request<StoreView>("/api/store");
 export const fetchSchema = () =>
   request<{ columns: SchemaColumn[]; statuses: Status[]; retests: Retest[] }>("/api/schema");
 
-/** Dry run: returns the report the commit would produce, writing nothing. */
-export async function previewImport(file: File, sheetName?: string): Promise<ImportReport> {
+export type ImportOptions = {
+  sheetName?: string;
+  /**
+   * The uploaded sheet is the complete tracker, so stored rows it does not
+   * mention are stale and get dropped. Off by default — a partial upload must
+   * never delete anything.
+   */
+  pruneMissing?: boolean;
+};
+
+const importForm = (file: File, options: ImportOptions): FormData => {
   const form = new FormData();
   form.append("file", file);
-  if (sheetName) form.append("sheetName", sheetName);
+  if (options.sheetName) form.append("sheetName", options.sheetName);
+  if (options.pruneMissing) form.append("pruneMissing", "true");
+  return form;
+};
+
+/** Dry run: returns the report the commit would produce, writing nothing. */
+export async function previewImport(
+  file: File,
+  options: ImportOptions = {},
+): Promise<ImportReport> {
   const { report } = await request<{ report: ImportReport }>("/api/import/preview", {
     method: "POST",
-    body: form,
+    body: importForm(file, options),
   });
   return report;
 }
 
 export async function commitImport(
   file: File,
-  sheetName?: string,
+  options: ImportOptions = {},
 ): Promise<{ report: ImportReport; store: StoreView }> {
-  const form = new FormData();
-  form.append("file", file);
-  if (sheetName) form.append("sheetName", sheetName);
   return request<{ report: ImportReport; store: StoreView }>("/api/import/commit", {
     method: "POST",
-    body: form,
+    body: importForm(file, options),
   });
 }
 
