@@ -170,6 +170,12 @@
   }
 }
 
+@keyframes flow-dash-y {
+  to {
+    background-position: 0 200%;
+  }
+}
+
 @keyframes pulse-ring {
   0% {
     box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent);
@@ -216,6 +222,17 @@
   );
   background-size: 200% 100%;
   animation: flow-dash 2.4s linear infinite;
+}
+
+@utility flow-line-y {
+  background-image: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in oklab, var(--accent) 80%, transparent),
+    transparent
+  );
+  background-size: 100% 200%;
+  animation: flow-dash-y 2.4s linear infinite;
 }
 
 @utility pulse-node {
