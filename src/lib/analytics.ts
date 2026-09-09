@@ -517,6 +517,12 @@ export type Kpis = {
   resolved: number;
   notResolved: number;
   notRetested: number;
+  /**
+   * Everything not confirmed fixed: an explicit "Tested but Not Resolved" plus
+   * every row nobody has re-tested at all. A defect no one has re-tested is not
+   * resolved either, so counting only the explicit failures flatters the number.
+   */
+  stillToResolve: number;
   medianResolution: number | null;
   p90Resolution: number | null;
   measured: number;
@@ -550,6 +556,9 @@ export function kpis(rows: Row[]): Kpis {
     resolved: rows.filter((r) => r.retest === "Resolved").length,
     notResolved: rows.filter((r) => r.retest === "Tested but Not Resolved").length,
     notRetested: rows.filter((r) => r.retest === "Not retested").length,
+    stillToResolve: rows.filter(
+      (r) => r.retest === "Tested but Not Resolved" || r.retest === "Not retested",
+    ).length,
     medianResolution: median(durations),
     p90Resolution: percentile(durations, 90),
     measured: durations.length,

@@ -108,29 +108,51 @@ export function StatTile({
   value,
   hint,
   tone = "default",
+  share,
 }: {
   label: string;
   value: string;
   hint?: string;
   tone?: "default" | "good" | "warning" | "critical";
+  /** Draws a meter under the value, so a percentage reads at a glance. */
+  share?: { part: number; whole: number };
 }) {
-  const toneClass =
+  const color =
     tone === "good"
-      ? "text-[var(--good)]"
+      ? "var(--good)"
       : tone === "warning"
-        ? "text-[var(--serious)]"
+        ? "var(--serious)"
         : tone === "critical"
-          ? "text-[var(--critical)]"
-          : "text-primary";
+          ? "var(--critical)"
+          : "var(--series-1)";
 
   return (
     <div
-      className="rounded-2xl border border-border bg-card p-4"
+      className="flex flex-col rounded-2xl border border-border bg-card p-4"
       style={{ boxShadow: "var(--shadow-card)" }}
     >
       <p className="text-xs uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className={cn("mt-1 font-display text-3xl font-bold", toneClass)}>{value}</p>
-      {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
+      <p className="mt-1 font-display text-3xl font-bold" style={{ color }}>
+        {value}
+      </p>
+      {share && share.whole > 0 ? (
+        // The unfilled track is a wash of the same colour, so the state reads
+        // across the whole bar rather than only where it happens to stop.
+        <div
+          className="mt-2 h-1.5 overflow-hidden rounded-full"
+          style={{ background: `color-mix(in oklab, ${color} 18%, transparent)` }}
+          role="presentation"
+        >
+          <div
+            className="h-full rounded-full transition-[width] duration-500"
+            style={{
+              width: `${Math.min(100, Math.round((share.part / share.whole) * 100))}%`,
+              background: color,
+            }}
+          />
+        </div>
+      ) : null}
+      {hint ? <p className="mt-2 text-xs leading-snug text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }

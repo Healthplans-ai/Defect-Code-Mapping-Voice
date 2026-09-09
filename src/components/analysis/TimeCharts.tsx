@@ -6,6 +6,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Line,
   ResponsiveContainer,
   Tooltip,
@@ -29,6 +30,19 @@ import {
  * No chart below carries a second y-scale: the two series on each plot are the
  * same unit, so one axis reads honestly.
  */
+
+/**
+ * Direct value labels wear a text token, never the series colour: a light
+ * categorical hue is unreadable as text on the card surface. Identity comes
+ * from the mark underneath.
+ */
+const VALUE_LABEL = {
+  fill: "var(--muted-foreground)",
+  fontSize: 11,
+  fontWeight: 600,
+  // A "0" floating over a zero-height bar is noise: the gap already says it.
+  formatter: (v: unknown) => (typeof v === "number" && v > 0 ? String(v) : ""),
+} as const;
 
 const AXIS = {
   stroke: "var(--axis)",
@@ -180,8 +194,8 @@ export function ReportedVsSolved({ data }: { data: TimelinePoint[] }) {
   const max = data.reduce((m, d) => Math.max(m, d.reported, d.solved), 0);
 
   return (
-    <Frame height={260}>
-      <BarChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: -18 }} barGap={2}>
+    <Frame height={300}>
+      <BarChart data={data} margin={{ top: 22, right: 12, bottom: 4, left: -14 }} barGap={2}>
         <CartesianGrid vertical={false} stroke="var(--grid)" />
         <XAxis {...timeAxis} />
         <YAxis {...countAxis(max)} />
@@ -189,9 +203,18 @@ export function ReportedVsSolved({ data }: { data: TimelinePoint[] }) {
           cursor={{ fill: "var(--muted)", opacity: 0.6 }}
           content={seriesTooltip(withSolved ? REPORTED_SERIES : REPORTED_SERIES.slice(0, 1))}
         />
-        <Bar dataKey="reported" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={24} />
+        <Bar dataKey="reported" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={28}>
+          {/*
+            Few enough columns that labelling every cap is clearer than making
+            the reader hover or trace back to the axis. Recharts hides a label
+            that will not fit, so a dense slice degrades to the axis on its own.
+          */}
+          <LabelList dataKey="reported" position="top" {...VALUE_LABEL} />
+        </Bar>
         {withSolved ? (
-          <Bar dataKey="solved" fill="var(--series-2)" radius={[4, 4, 0, 0]} maxBarSize={24} />
+          <Bar dataKey="solved" fill="var(--series-2)" radius={[4, 4, 0, 0]} maxBarSize={28}>
+            <LabelList dataKey="solved" position="top" {...VALUE_LABEL} />
+          </Bar>
         ) : null}
       </BarChart>
     </Frame>
@@ -210,8 +233,8 @@ export function BacklogChart({ data }: { data: BacklogPoint[] }) {
   const max = data.reduce((m, d) => Math.max(m, d.cumulativeReported), 0);
 
   return (
-    <Frame height={260}>
-      <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: -18 }}>
+    <Frame height={300}>
+      <AreaChart data={data} margin={{ top: 22, right: 12, bottom: 4, left: -14 }}>
         <CartesianGrid vertical={false} stroke="var(--grid)" />
         <XAxis {...timeAxis} />
         <YAxis {...countAxis(max)} />
@@ -266,8 +289,8 @@ export function BandChart({ data, unitLabel }: { data: Slice[]; unitLabel: strin
     ] ?? ORDINAL_STEPS[0];
 
   return (
-    <Frame height={220}>
-      <BarChart data={data} margin={{ top: 20, right: 8, bottom: 4, left: -18 }}>
+    <Frame height={250}>
+      <BarChart data={data} margin={{ top: 24, right: 12, bottom: 4, left: -14 }}>
         <CartesianGrid vertical={false} stroke="var(--grid)" />
         <XAxis dataKey="name" {...AXIS} tickLine={false} />
         <YAxis {...countAxis(data.reduce((m, d) => Math.max(m, d.value), 0))} />
@@ -288,7 +311,8 @@ export function BandChart({ data, unitLabel }: { data: Slice[]; unitLabel: strin
             />
           )}
         />
-        <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={40}>
+        <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={44}>
+          <LabelList dataKey="value" position="top" {...VALUE_LABEL} />
           {data.map((d, i) => (
             <Cell key={d.name} fill={step(i)} />
           ))}

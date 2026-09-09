@@ -12,20 +12,9 @@ import { cn } from "@/lib/utils";
 import { RETESTS, STATUSES, type Retest, type Status } from "@/lib/api";
 import { patchDefect, type ComponentView, type DefectRecord } from "@/lib/api";
 import { DEFECT_STORE_KEY } from "@/hooks/useDefectStore";
-
-const statusStyles: Record<Status, string> = {
-  Done: "bg-accent/25 text-accent-foreground border-accent/50",
-  WIP: "bg-warn/20 text-foreground border-warn/50",
-  Blocked: "bg-destructive/15 text-destructive border-destructive/40",
-  "No defect": "bg-muted text-muted-foreground border-border",
-};
-
-const retestStyles: Record<Retest, string> = {
-  Resolved: "bg-accent text-accent-foreground",
-  "Tested but Not Resolved": "bg-destructive text-destructive-foreground",
-  "No defect": "bg-muted text-muted-foreground",
-  "Not retested": "bg-secondary text-secondary-foreground",
-};
+// The same status/retest colours the analysis page uses, so a "Done" here and a
+// "Done" on a chart are the same green rather than two different ideas of it.
+import { RETEST_COLOR, STATUS_COLOR } from "@/components/analysis/palette";
 
 function fmt(d: string) {
   if (!d) return "no date";
@@ -81,6 +70,40 @@ export function DefectDialog({
     return base;
   }, [filtered]);
 
+  /**
+   * Retest read for the header.
+   *
+   * "Still to resolve" deliberately groups `Tested but Not Resolved` with
+   * `Not retested`: a defect nobody has re-tested is not resolved either, so
+   * counting only the explicit failures would flatter the number.
+   */
+  const resolvedCount = useMemo(
+    () => filtered.filter((d) => d.retest === "Resolved").length,
+    [filtered],
+  );
+  const openCount = useMemo(
+    () =>
+      filtered.filter((d) => d.retest === "Tested but Not Resolved" || d.retest === "Not retested")
+        .length,
+    [filtered],
+  );
+
+  /** Totals over the unfiltered set, so a chip never vanishes mid-filter. */
+  const statusTotals = useMemo(() => {
+    const base: Record<string, number> = {};
+    for (const d of all) base[d.status] = (base[d.status] ?? 0) + 1;
+    return base;
+  }, [all]);
+
+  const retestTotals = useMemo(() => {
+    const base: Record<string, number> = {};
+    for (const d of all) base[d.retest] = (base[d.retest] ?? 0) + 1;
+    return base;
+  }, [all]);
+
+  const dirty =
+    from !== "" || to !== "" || status !== "All" || retest !== "All" || category !== "All";
+
   const reset = () => {
     setFrom("");
     setTo("");
@@ -100,108 +123,170 @@ export function DefectDialog({
         onOpenChange(v);
       }}
     >
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto p-0">
-        <div className="bg-[image:var(--gradient-pipeline)] p-6 text-primary-foreground">
+      {/*
+        Flex column set inline on purpose: DialogContent ships `display: grid`,
+        and a `flex` utility here is not guaranteed to win the cascade against
+        it. Without a real flex column the header cannot stay put and the list
+        cannot scroll — the overflow just clips every defect past the third.
+      */}
+      <DialogContent
+        className="max-h-[90vh] max-w-3xl overflow-hidden p-0"
+        style={{ display: "flex", flexDirection: "column" }}
+      >
+        {/* ---------------------------------------------------------- header */}
+        <div className="shrink-0 bg-[image:var(--gradient-pipeline)] px-6 pb-5 pt-6 text-primary-foreground">
           <DialogHeader>
-            <div className="flex items-center gap-3">
-              <span className="flex size-10 items-center justify-center rounded-full bg-accent font-display text-base font-bold text-accent-foreground">
+            <div className="flex items-start gap-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent font-display text-sm font-bold text-accent-foreground">
                 {component.id === 0 ? "?" : component.id}
               </span>
-              <div className="text-left">
-                <DialogTitle className="font-display text-2xl font-bold">
+              <div className="min-w-0 text-left">
+                <DialogTitle className="font-display text-xl font-bold leading-tight">
                   {component.name}
                 </DialogTitle>
-                <DialogDescription className="text-primary-foreground/80">
+                <DialogDescription className="mt-0.5 text-sm text-primary-foreground/75">
                   {component.blurb}
                 </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
-            <Stat label="Total" value={filtered.length} highlight />
-            {STATUSES.map((s) => (
-              <Stat key={s} label={s} value={counts[s] ?? 0} />
-            ))}
+          {/*
+            One bar instead of five tiles. The old header gave equal weight to
+            "0 WIP" and "0 Blocked", so most of it was reporting the absence of
+            things; this shows the shape of what is actually here.
+          */}
+          <div className="mt-5 flex items-end justify-between gap-4">
+            <p className="font-display text-3xl font-bold leading-none">
+              {filtered.length}
+              <span className="ml-2 align-middle text-xs font-semibold uppercase tracking-wider text-primary-foreground/70">
+                {filtered.length === 1 ? "defect" : "defects"}
+                {filtered.length !== all.length ? ` of ${all.length}` : ""}
+              </span>
+            </p>
+            {resolvedCount > 0 || openCount > 0 ? (
+              <p className="text-xs text-primary-foreground/80">
+                <span className="font-semibold text-primary-foreground">{resolvedCount}</span>{" "}
+                retested &amp; resolved
+                {openCount > 0 ? (
+                  <>
+                    {" · "}
+                    <span className="font-semibold text-primary-foreground">{openCount}</span> still
+                    to resolve
+                  </>
+                ) : null}
+              </p>
+            ) : null}
           </div>
+
+          {filtered.length > 0 ? (
+            <>
+              <div className="mt-2 flex h-2 gap-0.5 overflow-hidden rounded-full bg-primary-foreground/15">
+                {STATUSES.filter((s) => (counts[s] ?? 0) > 0).map((s) => (
+                  <span
+                    key={s}
+                    title={`${s}: ${counts[s]}`}
+                    style={{
+                      flexGrow: counts[s] ?? 0,
+                      flexBasis: 0,
+                      background: STATUS_COLOR[s],
+                    }}
+                  />
+                ))}
+              </div>
+              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                {STATUSES.filter((s) => (counts[s] ?? 0) > 0).map((s) => (
+                  <li
+                    key={s}
+                    className="flex items-center gap-1.5 text-xs text-primary-foreground/80"
+                  >
+                    <span
+                      aria-hidden
+                      className="size-2 rounded-full"
+                      style={{ background: STATUS_COLOR[s] }}
+                    />
+                    {s}
+                    <span className="font-semibold text-primary-foreground">{counts[s]}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
         </div>
 
-        <div className="space-y-4 p-6">
-          {/* Filters */}
-          <div className="rounded-2xl border border-border bg-muted/40 p-4">
-            <div className="flex flex-wrap items-end gap-4">
-              <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
-                From date
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
-                To date
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
-                Test category
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground"
-                >
-                  <option value="All">All categories</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={reset}
-                className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold transition-colors hover:border-primary hover:text-primary"
-              >
-                Clear filters
-              </button>
-            </div>
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Chip active={status === "All"} onClick={() => setStatus("All")}>
-                All statuses
-              </Chip>
-              {STATUSES.map((s) => (
-                <Chip key={s} active={status === s} onClick={() => setStatus(s)}>
-                  {s}
-                </Chip>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
+          {/* --------------------------------------------------------- filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              aria-label="From date"
+              className="h-8 rounded-lg border border-border bg-background px-2 text-xs outline-none transition-colors focus:border-primary"
+            />
+            <span className="text-xs text-muted-foreground">→</span>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              aria-label="To date"
+              className="h-8 rounded-lg border border-border bg-background px-2 text-xs outline-none transition-colors focus:border-primary"
+            />
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              aria-label="Test category"
+              className="h-8 max-w-52 rounded-lg border border-border bg-background px-2 text-xs outline-none transition-colors focus:border-primary"
+            >
+              <option value="All">All categories</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
               ))}
-            </div>
+            </select>
+
+            <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+
+            <Chip active={status === "All"} onClick={() => setStatus("All")}>
+              All
+            </Chip>
+            {STATUSES.filter((s) => (statusTotals[s] ?? 0) > 0).map((s) => (
+              <Chip key={s} active={status === s} onClick={() => setStatus(s)}>
+                {s}
+              </Chip>
+            ))}
+
             {/*
-              Only worth offering when the rows disagree. With no Retest column
-              in the sheet every row is "Not retested", and a filter whose every
-              option but one returns nothing is just a dead control.
+              Only worth offering when the rows disagree. With no retest verdict
+              recorded at all, every option but one returns nothing.
             */}
-            {hasRetestVerdicts && (
-              <div className="mt-2 flex flex-wrap gap-2">
+            {hasRetestVerdicts ? (
+              <>
+                <span className="mx-1 h-5 w-px bg-border" aria-hidden />
                 <Chip active={retest === "All"} onClick={() => setRetest("All")}>
                   Any retest
                 </Chip>
-                {RETESTS.map((r) => (
+                {RETESTS.filter((r) => (retestTotals[r] ?? 0) > 0).map((r) => (
                   <Chip key={r} active={retest === r} onClick={() => setRetest(r)}>
-                    {r}
+                    {r === "Tested but Not Resolved" ? "Not resolved" : r}
                   </Chip>
                 ))}
-              </div>
-            )}
+              </>
+            ) : null}
+
+            {dirty ? (
+              <button
+                type="button"
+                onClick={reset}
+                className="ml-auto h-8 rounded-lg border border-border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              >
+                Clear
+              </button>
+            ) : null}
           </div>
 
-          {/* List */}
+          {/* ------------------------------------------------------------ list */}
           {filtered.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border p-8 text-center">
               <p className="font-display text-lg font-semibold">
@@ -218,129 +303,128 @@ export function DefectDialog({
               {filtered.map((d, i) => (
                 <li
                   key={d.defectId}
-                  className="rise rounded-2xl border border-border bg-card p-4"
-                  style={{ animationDelay: `${Math.min(i, 10) * 50}ms` }}
+                  className="rise overflow-hidden rounded-2xl border border-border bg-card"
+                  style={{
+                    animationDelay: `${Math.min(i, 10) * 40}ms`,
+                    boxShadow: "var(--shadow-card)",
+                    // A status stripe down the edge, so a long list can be
+                    // scanned for the rows that still need work.
+                    borderLeft: `4px solid ${STATUS_COLOR[d.status]}`,
+                  }}
                 >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-primary px-2 py-0.5 font-mono text-xs font-medium text-primary-foreground">
-                      {d.label}
-                    </span>
-                    <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                      {fmt(d.date)}
-                    </span>
-                    <span
-                      className={cn(
-                        "rounded-full border px-2 py-0.5 text-xs font-medium",
-                        statusStyles[d.status],
-                      )}
-                    >
-                      {d.status}
-                      {d.rawStatus && d.rawStatus !== d.status ? ` (“${d.rawStatus}”)` : ""}
-                    </span>
-                    {/*
-                      "Not retested" is the absence of a verdict, not a verdict.
-                      A tracker with no Retest column would otherwise stamp it on
-                      every single row, which reads as a finding.
-                    */}
-                    {d.retest !== "Not retested" && (
-                      <span
-                        className={cn(
-                          "rounded-full px-2 py-0.5 text-xs font-semibold",
-                          retestStyles[d.retest],
-                        )}
+                  <div className="p-4">
+                    {/* Row 1: identity and state */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                      <span className="rounded-md bg-primary px-2 py-0.5 font-mono text-xs font-medium text-primary-foreground">
+                        {d.label}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{fmt(d.date)}</span>
+
+                      <span className="mx-0.5 h-3 w-px bg-border" aria-hidden />
+
+                      <span className="flex items-center gap-1.5 text-xs font-medium">
+                        <span
+                          aria-hidden
+                          className="size-2 rounded-full"
+                          style={{ background: STATUS_COLOR[d.status] }}
+                        />
+                        {d.status}
+                      </span>
+                      {d.retest !== "Not retested" ? (
+                        <span className="flex items-center gap-1.5 text-xs font-medium">
+                          <span
+                            aria-hidden
+                            className="size-2 rounded-full"
+                            style={{ background: RETEST_COLOR[d.retest] }}
+                          />
+                          {d.retest === "Tested but Not Resolved" ? "Not resolved" : d.retest}
+                        </span>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        onClick={() => setEditing(editing === d.defectId ? null : d.defectId)}
+                        className="ml-auto rounded-full border border-border px-2.5 py-0.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary hover:text-primary"
                       >
-                        {d.retest}
-                      </span>
-                    )}
-                    {d.phase && (
-                      <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
-                        {d.phase}
-                      </span>
-                    )}
-                    {d.batch && d.batch !== "-" && (
-                      <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
-                        {d.batch}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setEditing(editing === d.defectId ? null : d.defectId)}
-                      className="ml-auto rounded-full border border-border px-2 py-0.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-                    >
-                      {editing === d.defectId ? "close" : "edit mapping"}
-                    </button>
+                        {editing === d.defectId ? "close" : "edit mapping"}
+                      </button>
+                    </div>
+
+                    <p className="mt-2.5 font-display text-base font-semibold leading-snug">
+                      {d.title}
+                    </p>
+
+                    {/* Row 2: where it sits, as tags rather than a run-on line */}
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {d.category ? <Tag>{d.category}</Tag> : null}
+                      {d.alsoTouches
+                        ? d.alsoTouches
+                            .split(";")
+                            .map((c) => c.trim())
+                            .filter(Boolean)
+                            .map((c) => (
+                              <Tag key={c} muted>
+                                also {c}
+                              </Tag>
+                            ))
+                        : null}
+                      {d.phase ? <Tag muted>{d.phase}</Tag> : null}
+                      {d.testType ? <Tag muted>{d.testType}</Tag> : null}
+                      {d.batch && d.batch !== "-" ? <Tag mono>{d.batch}</Tag> : null}
+                    </div>
+
+                    {/* Row 3: the remaining columns, on a grid so labels line up */}
+                    {d.testedBy || d.solvedOn ? (
+                      <dl className="mt-3 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
+                        {d.testedBy ? <Field label="Tested by">{d.testedBy}</Field> : null}
+                        {d.solvedOn ? <Field label="Solved on">{fmt(d.solvedOn)}</Field> : null}
+                      </dl>
+                    ) : null}
+
+                    {/*
+                      Only shown when the row carries one. The tracker has no
+                      Code References column, and a placeholder pointing at a
+                      column that does not exist is worse than silence.
+                    */}
+                    {d.code ? (
+                      <p className="mt-3 rounded-lg bg-ink px-3 py-2 font-mono text-xs leading-relaxed text-ink-foreground">
+                        {d.code}
+                      </p>
+                    ) : null}
+
+                    {d.notes || d.notesOnResolution ? (
+                      <div className="mt-3 space-y-1.5 border-t border-border/70 pt-2.5 text-xs leading-relaxed text-muted-foreground">
+                        {d.notes ? (
+                          <p>
+                            <span className="font-semibold text-foreground">Remark </span>
+                            {d.notes}
+                          </p>
+                        ) : null}
+                        {d.notesOnResolution ? (
+                          <p>
+                            <span className="font-semibold text-foreground">Resolution </span>
+                            {d.notesOnResolution}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {d.confidence || d.revision > 1 ? (
+                      <p className="mt-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+                        {[d.confidence || null, d.revision > 1 ? `rev ${d.revision}` : null]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    ) : null}
+
+                    {editing === d.defectId ? (
+                      <MappingEditor
+                        defect={d}
+                        components={allComponents}
+                        onDone={() => setEditing(null)}
+                      />
+                    ) : null}
                   </div>
-
-                  <p className="mt-2 font-display text-base font-semibold leading-snug">
-                    {d.title}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {[
-                      d.category || "uncategorised",
-                      d.alsoTouches ? `also touches ${d.alsoTouches}` : null,
-                      d.testType || null,
-                      d.testedBy ? `tested by ${d.testedBy}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-
-                  {/*
-                    Only shown when the row carries one. The tracker has no Code
-                    References column, and a placeholder telling the reader to
-                    fill in a column that does not exist is worse than silence.
-                  */}
-                  {d.code && (
-                    <p className="mt-3 rounded-lg bg-ink px-3 py-2 font-mono text-xs leading-relaxed text-ink-foreground">
-                      {d.code}
-                    </p>
-                  )}
-
-                  {/* Every remaining column, labelled as the sheet labels it. */}
-                  {(d.solvedOn || d.testByTeamMembers || d.notes || d.notesOnResolution) && (
-                    <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
-                      {d.solvedOn && (
-                        <div>
-                          <dt className="inline font-semibold">Solved on: </dt>
-                          <dd className="inline">{fmt(d.solvedOn)}</dd>
-                        </div>
-                      )}
-                      {d.testByTeamMembers && (
-                        <div>
-                          <dt className="inline font-semibold">Test by team members: </dt>
-                          <dd className="inline">{d.testByTeamMembers}</dd>
-                        </div>
-                      )}
-                      {d.notes && (
-                        <div>
-                          <dt className="inline font-semibold">Remark: </dt>
-                          <dd className="inline">{d.notes}</dd>
-                        </div>
-                      )}
-                      {d.notesOnResolution && (
-                        <div>
-                          <dt className="inline font-semibold">Resolution: </dt>
-                          <dd className="inline">{d.notesOnResolution}</dd>
-                        </div>
-                      )}
-                    </dl>
-                  )}
-
-                  {(d.confidence || d.revision > 1) && (
-                    <p className="mt-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-                      {[d.confidence || null, d.revision > 1 ? `rev ${d.revision}` : null]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                  )}
-
-                  {editing === d.defectId && (
-                    <MappingEditor
-                      defect={d}
-                      components={allComponents}
-                      onDone={() => setEditing(null)}
-                    />
-                  )}
                 </li>
               ))}
             </ol>
@@ -348,6 +432,38 @@ export function DefectDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A small neutral pill for the facts that only need to be legible, not loud. */
+function Tag({
+  children,
+  muted,
+  mono,
+}: {
+  children: React.ReactNode;
+  muted?: boolean;
+  mono?: boolean;
+}) {
+  return (
+    <span
+      className={cn(
+        "rounded-md px-1.5 py-0.5 text-[11px]",
+        mono && "font-mono",
+        muted ? "bg-muted text-muted-foreground" : "bg-secondary text-secondary-foreground",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-1.5">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 font-medium text-foreground">{children}</dd>
+    </div>
   );
 }
 

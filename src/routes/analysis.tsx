@@ -94,7 +94,13 @@ const solvedSubtitle = (
 function AnalysisPage() {
   const { store, hasData, isEmpty, isFetching, loadError, refetch } = useDefectStore();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [granularity, setGranularity] = useState<Granularity>("day");
+  /**
+   * Weekly by default. The tracker runs over about six weeks, which is roughly
+   * forty daily columns most of them one or two rows tall — technically correct
+   * and hard to read anything off. Weeks show the shape; the toggle is right
+   * there when a day matters.
+   */
+  const [granularity, setGranularity] = useState<Granularity>("week");
   const [matrixDimension, setMatrixDimension] = useState<"status" | "retest">("status");
 
   const allRows = useMemo(() => buildRows(store.components), [store.components]);
@@ -328,6 +334,7 @@ function AnalysisPage() {
                   value={pct(stats.done, stats.total)}
                   hint={`${stats.done} of ${stats.total} rows`}
                   tone="good"
+                  share={{ part: stats.done, whole: stats.total }}
                 />
                 <StatTile
                   label="Still open"
@@ -335,10 +342,26 @@ function AnalysisPage() {
                   hint={stats.blocked > 0 ? `${stats.blocked} blocked` : "none blocked"}
                   tone={stats.blocked > 0 ? "critical" : "warning"}
                 />
+                {/*
+                  Share is against the rows that have a verdict either way, and
+                  the hint counts everything not confirmed fixed — an explicit
+                  "Tested but Not Resolved" plus every row nobody re-tested,
+                  since neither is resolved. "No defect" rows are excluded from
+                  both: there was nothing to resolve.
+                */}
                 <StatTile
                   label="Retested & resolved"
-                  value={pct(stats.resolved, stats.total)}
-                  hint={`${stats.notRetested} never retested`}
+                  value={pct(stats.resolved, stats.resolved + stats.stillToResolve)}
+                  hint={
+                    stats.stillToResolve === 0
+                      ? `all ${stats.resolved} confirmed fixed`
+                      : `${stats.stillToResolve} still to resolve (${stats.notResolved} failed, ${stats.notRetested} not retested)`
+                  }
+                  tone={stats.stillToResolve > 0 ? "warning" : "good"}
+                  share={{
+                    part: stats.resolved,
+                    whole: stats.resolved + stats.stillToResolve,
+                  }}
                 />
                 <StatTile
                   label="Median time to fix"
