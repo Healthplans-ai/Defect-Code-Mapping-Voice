@@ -161,7 +161,11 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (API_URL === "") {
     throw new ApiError(
-      "VITE_API_URL is not set in this deployment, so there is no defects API to call. Point it at the backend's public URL and redeploy.",
+      "VITE_API_URL is not set in this deployment, so there is no defects API to call. " +
+        "A .env file will not do it — .env is git-ignored, so it never reaches the host. " +
+        "Set VITE_API_URL in the hosting project's own environment variables " +
+        "(on Vercel: Project → Settings → Environment Variables) and redeploy, " +
+        "because the value is compiled into the bundle at build time.",
       0,
       "unconfigured",
     );
