@@ -33,18 +33,6 @@ export const CONFIDENCE_COLOR: Record<ConfidenceBucket, string> = {
 };
 
 /**
- * Categorical slots, in fixed order. Identity follows the entity, never its
- * rank — a filter that drops a series must not repaint the survivors, so these
- * are declared once here rather than picked per render.
- */
-export type Series = { key: string; name: string; color: string; mark: "rect" | "line" };
-
-export const REPORTED_SERIES: Series[] = [
-  { key: "reported", name: "Raised", color: "var(--series-1)", mark: "rect" },
-  { key: "solved", name: "Marked solved", color: "var(--series-2)", mark: "rect" },
-];
-
-/**
  * Discrete steps of the one sequential hue, for the heatmap.
  *
  * `--seq-450` is deliberately skipped: heat cells print their count on top of

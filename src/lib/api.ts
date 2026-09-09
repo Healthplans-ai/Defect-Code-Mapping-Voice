@@ -242,6 +242,21 @@ export async function commitImport(
   });
 }
 
+/**
+ * Empty the tracker.
+ *
+ * The API takes the confirmation word in the body and refuses without it, so a
+ * mistyped fetch cannot wipe the store. It rewrites one blob — the defect
+ * store — with an empty document after snapshotting it; no blob is deleted and
+ * nothing outside that one path is touched.
+ */
+export const clearStore = () =>
+  request<{ cleared: number; snapshot: string | null; store: StoreView }>("/api/store/clear", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirm: "CLEAR" }),
+  });
+
 export const patchDefect = (defectId: string, patch: Record<string, unknown>) =>
   request<{ defect: DefectRecord; changes: { field: string; from: unknown; to: unknown }[] }>(
     `/api/defects/${encodeURIComponent(defectId)}`,

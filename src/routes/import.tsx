@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { SiteHeader } from "@/components/SiteHeader";
 import { cn } from "@/lib/utils";
 import {
+  clearStore,
   commitImport,
   fetchSchema,
   previewImport,
@@ -14,6 +15,15 @@ import {
   type ImportOutcome,
   type ImportReport,
 } from "@/lib/api";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DEFECT_STORE_KEY, useDefectStore } from "@/hooks/useDefectStore";
 
 export const Route = createFileRoute("/import")({
@@ -68,6 +78,9 @@ function ImportPage() {
    * spreadsheet's own after rows get renumbered or removed upstream.
    */
   const [pruneMissing, setPruneMissing] = useState(false);
+  /** Danger-zone dialog, and the word that has to be typed into it. */
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearWord, setClearWord] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const preview = useMutation({
@@ -90,6 +103,23 @@ function ImportPage() {
       setReport(r);
       toast.success(
         `Saved to Azure Blob — ${r.totals.new} new, ${r.totals.updated} updated, ${r.totals.unchanged} unchanged.`,
+      );
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const clear = useMutation({
+    mutationFn: clearStore,
+    onSuccess: ({ cleared, store: fresh }) => {
+      queryClient.setQueryData(DEFECT_STORE_KEY, fresh);
+      void queryClient.invalidateQueries({ queryKey: DEFECT_STORE_KEY });
+      setClearOpen(false);
+      setClearWord("");
+      setReport(null);
+      toast.success(
+        cleared === 0
+          ? "The tracker was already empty."
+          : `Cleared ${cleared} row${cleared === 1 ? "" : "s"}. A snapshot was saved first.`,
       );
     },
     onError: (err: Error) => toast.error(err.message),
@@ -473,6 +503,101 @@ function ImportPage() {
             </ul>
           </section>
         )}
+
+        {/*
+          Danger zone.
+          Clearing rewrites one blob — the defect store — with an empty
+          document, after the server snapshots it. No blob is deleted and
+          nothing else in the container is touched, which is what the copy
+          below promises and what the endpoint is written to guarantee.
+        */}
+        <section className="mt-16">
+          <h2 className="font-display text-2xl font-bold">Danger zone</h2>
+          <div className="mt-4 rounded-2xl border border-destructive/40 bg-destructive/5 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-2xl">
+                <p className="font-display text-sm font-semibold">Clear the tracker</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Removes all {store.summary.total} defect rows and the import history, leaving the
+                  ten pipeline components. Every page then shows an empty map until the tracker is
+                  uploaded again.
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  This rewrites one file —{" "}
+                  <span className="font-mono text-xs text-foreground">
+                    defects-mapping/defects.json
+                  </span>{" "}
+                  — with an empty tracker, and takes a snapshot of it first. It deletes nothing: the
+                  archived .xlsx uploads, the import reports and the snapshots all stay, and no
+                  other blob in the container is touched.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setClearWord("");
+                  setClearOpen(true);
+                }}
+                disabled={clear.isPending || store.summary.total === 0}
+                className="shrink-0 rounded-full border border-destructive px-5 py-2.5 font-display text-sm font-semibold text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-destructive"
+              >
+                {store.summary.total === 0 ? "Already empty" : "Clear tracker…"}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear all {store.summary.total} tracker rows?</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2">
+                  <p>
+                    Every defect row and the import history are removed. The ten pipeline components
+                    stay, and a snapshot of the current tracker is saved first, so this is
+                    recoverable from blob storage.
+                  </p>
+                  <p>
+                    Nothing is deleted: only{" "}
+                    <span className="font-mono text-xs">defects-mapping/defects.json</span> is
+                    rewritten. The archived uploads and every other blob in the container are left
+                    alone.
+                  </p>
+                  <p>
+                    Type <span className="font-mono font-semibold text-foreground">CLEAR</span> to
+                    confirm.
+                  </p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <input
+              value={clearWord}
+              onChange={(e) => setClearWord(e.target.value)}
+              placeholder="CLEAR"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="Type CLEAR to confirm"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus:border-destructive"
+            />
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={clear.isPending}>Cancel</AlertDialogCancel>
+              {/*
+                Not an AlertDialogAction: that closes the dialog on click, which
+                would dismiss it before the request has come back and leave a
+                failure with nowhere to show.
+              */}
+              <button
+                type="button"
+                disabled={clearWord !== "CLEAR" || clear.isPending}
+                onClick={() => clear.mutate()}
+                className="rounded-full bg-destructive px-5 py-2.5 font-display text-sm font-semibold text-destructive-foreground disabled:opacity-50"
+              >
+                {clear.isPending ? "Clearing…" : "Clear the tracker"}
+              </button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </section>
     </main>
   );

@@ -1,62 +1,93 @@
-import { Bar, CartesianGrid, ComposedChart, LabelList, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, LabelList, Tooltip, XAxis, YAxis } from "recharts";
 
-import { hasSolvedDates, type TimelinePoint } from "@/lib/analytics";
+import { STATUS_ORDER, type TimelinePoint } from "@/lib/analytics";
+import type { Status } from "@/lib/api";
 import { Empty } from "@/components/analysis/primitives";
-import { REPORTED_SERIES } from "@/components/analysis/palette";
-import { countAxis, timeAxis, VALUE_LABEL } from "@/components/analysis/chart-kit";
-import { Frame, SeriesReadout } from "@/components/analysis/chart-parts";
+import { STATUS_COLOR } from "@/components/analysis/palette";
+import {
+  countAxis,
+  pointOf,
+  timeAxis,
+  VALUE_LABEL,
+  type RechartsTooltip,
+} from "@/components/analysis/chart-kit";
+import { Frame, Readout } from "@/components/analysis/chart-parts";
 
 /**
- * The timeline chart. Recharts earns its keep here (axes, a crosshair,
- * responsive width); the shared axis and tooltip plumbing lives in `chart-kit`.
- *
- * It carries no second y-scale: both series count tracker rows, so one axis
- * reads honestly.
+ * The timeline. Recharts earns its keep here (axes, a crosshair, responsive
+ * width); the shared axis and tooltip plumbing lives in `chart-kit`.
  */
-
-// ---------------------------------------------------------------- charts
 
 /**
- * Rows raised vs rows marked solved, per period. Same unit, grouped columns,
- * with a soft trend line over the raised series so the shape survives a slice
- * that is mostly one- and two-row columns.
+ * Rows raised per period, stacked by where each one stands today.
  *
- * The solved series is dropped entirely when no row in the slice carries a
- * `Solved on` date — a second colour pinned at zero for the whole width reads
- * as data when it is really an empty column in the sheet.
+ * One cohort, segments that add up to the bar: the height is always the number
+ * raised and the colour says how much of it is finished, so a bar with no amber
+ * or red left in it is a period fully closed out.
+ *
+ * That is the question this chart exists to answer, and the one the old "marked
+ * solved" series could not. It counted fixes by the date they landed, which is
+ * a different set of rows from the ones raised in the same period — a fix in
+ * week 5 for a defect from week 2 scored against week 5 — so it routinely drew
+ * more solved than raised, and neither bar said whether a week was done.
  */
-export function ReportedVsSolved({ data }: { data: TimelinePoint[] }) {
+export function RaisedByStatus({ data }: { data: TimelinePoint[] }) {
   if (data.length === 0) return <Empty label="No dated rows in this slice." />;
 
-  const withSolved = hasSolvedDates(data);
-  const max = data.reduce((m, d) => Math.max(m, d.reported, d.solved), 0);
+  const max = data.reduce((m, d) => Math.max(m, d.raised), 0);
+  // Only statuses that appear somewhere in this slice get a layer, so an absent
+  // one does not add an invisible 2px stroke to the top of every bar.
+  const present = STATUS_ORDER.filter((s) => data.some((d) => d.byStatus[s] > 0));
 
   return (
     <Frame height={300}>
-      <ComposedChart data={data} margin={{ top: 22, right: 12, bottom: 4, left: -14 }} barGap={2}>
+      <BarChart data={data} margin={{ top: 22, right: 12, bottom: 4, left: -14 }}>
         <CartesianGrid vertical={false} stroke="var(--grid)" />
         <XAxis {...timeAxis} />
         <YAxis {...countAxis(max)} />
-        <Tooltip
-          cursor={{ fill: "var(--muted)", opacity: 0.6 }}
-          content={
-            <SeriesReadout series={withSolved ? REPORTED_SERIES : REPORTED_SERIES.slice(0, 1)} />
-          }
-        />
-        <Bar dataKey="reported" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={28}>
-          {/*
-            Few enough columns that labelling every cap is clearer than making
-            the reader hover or trace back to the axis. Recharts hides a label
-            that will not fit, so a dense slice degrades to the axis on its own.
-          */}
-          <LabelList dataKey="reported" position="top" {...VALUE_LABEL} />
-        </Bar>
-        {withSolved ? (
-          <Bar dataKey="solved" fill="var(--series-2)" radius={[4, 4, 0, 0]} maxBarSize={28}>
-            <LabelList dataKey="solved" position="top" {...VALUE_LABEL} />
+        <Tooltip cursor={{ fill: "var(--muted)", opacity: 0.6 }} content={<PeriodReadout />} />
+        {present.map((status, i) => (
+          <Bar
+            key={status}
+            dataKey={`byStatus.${status}`}
+            stackId="raised"
+            fill={STATUS_COLOR[status]}
+            maxBarSize={34}
+            // The 2px surface stroke is what separates one segment from the
+            // next; without it two adjacent statuses read as a single block.
+            stroke="var(--card)"
+            strokeWidth={2}
+          >
+            {/* The stack's own total, labelled once on the topmost layer. */}
+            {i === present.length - 1 ? (
+              <LabelList dataKey="raised" position="top" {...VALUE_LABEL} />
+            ) : null}
           </Bar>
-        ) : null}
-      </ComposedChart>
+        ))}
+      </BarChart>
     </Frame>
+  );
+}
+
+function PeriodReadout({ active, label, payload }: RechartsTooltip) {
+  const point = pointOf(payload) as TimelinePoint | undefined;
+  if (point === undefined) return null;
+  const open = point.byStatus.WIP + point.byStatus.Blocked;
+
+  return (
+    <Readout
+      active={Boolean(active)}
+      label={String(label ?? "")}
+      rows={[
+        { name: "raised", value: point.raised, color: "var(--muted-foreground)", mark: "rect" },
+        ...STATUS_ORDER.filter((s) => point.byStatus[s] > 0).map((s: Status) => ({
+          name: s.toLowerCase(),
+          value: point.byStatus[s],
+          color: STATUS_COLOR[s],
+          mark: "rect" as const,
+        })),
+      ]}
+      note={open === 0 ? "everything raised here is closed out" : `${open} still open`}
+    />
   );
 }

@@ -236,8 +236,14 @@ export const MAX_TIMELINE_BUCKETS = 1500;
 export type TimelinePoint = {
   key: string;
   label: string;
-  reported: number;
-  solved: number;
+  /** Rows raised in this period. Always the sum of the four status counts. */
+  raised: number;
+  /** Of those rows, how many stand at each status *today*. */
+  byStatus: Record<Status, number>;
+  /** Of those rows, how many are Done today. */
+  done: number;
+  /** Raised less done — what this period still owes, as of now. */
+  outstanding: number;
 };
 
 export type Timeline = {
@@ -247,40 +253,50 @@ export type Timeline = {
 };
 
 /**
- * Rows per period by the date they were raised, alongside the count that were
- * marked solved in that same period. Same unit on both series, so one axis.
+ * Rows per period by the date they were raised, split by where each one stands
+ * today.
+ *
+ * The second series used to be rows whose `Solved on` fell in the same period,
+ * which is a different cohort from the first: a fix landing in week 5 for a
+ * defect raised in week 2 counted against week 5, so "solved" routinely
+ * outran "raised" and neither bar said anything about whether a week's work
+ * was finished. Reading the current status of the rows a period *raised*
+ * answers the question that was actually being asked — is everything from that
+ * week closed yet — and keeps both series on the same rows, so the segments
+ * add up to the bar.
  */
 export function timeline(rows: Row[], gran: Granularity): Timeline {
-  const reported = new Map<string, number>();
-  const solved = new Map<string, number>();
+  const buckets = new Map<string, Row[]>();
 
   for (const r of rows) {
     const raised = bucketOf(r.date, gran);
-    if (raised !== "") reported.set(raised, (reported.get(raised) ?? 0) + 1);
-    const fixed = bucketOf(r.solvedOn, gran);
-    if (fixed !== "") solved.set(fixed, (solved.get(fixed) ?? 0) + 1);
+    if (raised === "") continue;
+    const list = buckets.get(raised);
+    if (list) list.push(r);
+    else buckets.set(raised, [r]);
   }
 
-  const keys = bucketRange([...reported.keys(), ...solved.keys()], gran);
+  const keys = bucketRange([...buckets.keys()], gran);
   return {
     truncated: keys.length >= MAX_TIMELINE_BUCKETS,
-    points: keys.map((key) => ({
-      key,
-      label: bucketLabel(key, gran),
-      reported: reported.get(key) ?? 0,
-      solved: solved.get(key) ?? 0,
-    })),
+    points: keys.map((key) => {
+      const own = buckets.get(key) ?? [];
+      const byStatus = countInto(STATUS_ORDER, own, (r) => r.status);
+      return {
+        key,
+        label: bucketLabel(key, gran),
+        raised: own.length,
+        byStatus,
+        done: byStatus.Done,
+        outstanding: own.length - byStatus.Done,
+      };
+    }),
   };
 }
 
-/**
- * Does anything in this slice carry a `Solved on` date?
- *
- * When nothing does, the solved series is not "zero everywhere" — it is absent,
- * and the charts drop it rather than plot a flat line that looks like a finding.
- */
-export const hasSolvedDates = (points: TimelinePoint[]): boolean =>
-  points.some((p) => p.solved > 0);
+/** Periods where every row raised has since been closed out. */
+export const clearedPeriods = (points: TimelinePoint[]): number =>
+  points.filter((p) => p.raised > 0 && p.byStatus.WIP === 0 && p.byStatus.Blocked === 0).length;
 
 // ---------------------------------------------------------------- tallies
 

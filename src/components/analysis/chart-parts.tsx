@@ -1,21 +1,15 @@
 import { useEffect, useState } from "react";
 import { ResponsiveContainer } from "recharts";
 
-import type { Series } from "@/components/analysis/palette";
-import {
-  asNumber,
-  pointOf,
-  type RechartsTooltip,
-  type TooltipRow,
-} from "@/components/analysis/chart-kit";
+import { asNumber, type RechartsTooltip, type TooltipRow } from "@/components/analysis/chart-kit";
 
 /**
  * The two pieces every recharts figure renders around its marks: the responsive
  * frame, and the tooltip.
  *
  * The readouts are components rather than render callbacks so recharts can be
- * handed `content={<SeriesReadout series={…} />}` — it clones the element with
- * `active` / `label` / `payload` on it.
+ * handed `content={<ValueReadout … />}` — it clones the element with `active` /
+ * `label` / `payload` on it.
  */
 
 /**
@@ -78,28 +72,6 @@ export function Readout({
       </ul>
       {note ? <p className="mt-1.5 text-muted-foreground">{note}</p> : null}
     </div>
-  );
-}
-
-/** Lists every series whatever the pointer landed on, so the readout never jumps. */
-export function SeriesReadout({
-  series,
-  active,
-  label,
-  payload,
-}: RechartsTooltip & { series: Series[] }) {
-  const data = pointOf(payload);
-  return (
-    <Readout
-      active={Boolean(active) && data !== undefined}
-      label={String(label ?? "")}
-      rows={series.map((s) => ({
-        name: s.name,
-        value: asNumber(data?.[s.key]),
-        color: s.color,
-        mark: s.mark,
-      }))}
-    />
   );
 }
 

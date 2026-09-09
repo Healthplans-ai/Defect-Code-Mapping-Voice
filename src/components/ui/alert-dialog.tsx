@@ -4,6 +4,22 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 
+/**
+ * Enter animations only, on purpose.
+ *
+ * Radix keeps a closing dialog mounted until the exit animation reports back,
+ * and the `data-[state=closed]:animate-out` utilities here never fire an
+ * `animationstart` at all — so the first time this component was used the
+ * dialog went `data-state="closed"` and then simply stayed on screen, ignoring
+ * both Cancel and Escape. Setting `animation: none` on the node by hand
+ * unmounted it immediately, which is what pinned it on the exit animation.
+ *
+ * A dialog that will not close is a much worse bug than one that vanishes
+ * without a fade, so the exit classes are gone rather than debugged into
+ * working. Enter still animates. If you re-add them, verify the thing actually
+ * closes — `data-state` flipping to "closed" is not the same as unmounting.
+ */
+
 const AlertDialog = AlertDialogPrimitive.Root;
 
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
@@ -16,7 +32,7 @@ const AlertDialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Overlay
     className={cn(
-      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=open]:fade-in-0",
       className,
     )}
     {...props}
@@ -34,7 +50,7 @@ const AlertDialogContent = React.forwardRef<
     <AlertDialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg",
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:rounded-lg",
         className,
       )}
       {...props}

@@ -6,7 +6,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDefectStore } from "@/hooks/useDefectStore";
 import { StoreEmpty, StoreError, StoreLoading } from "@/components/StoreState";
-import { ReportedVsSolved } from "@/components/analysis/TimeCharts";
+import { RaisedByStatus } from "@/components/analysis/TimeCharts";
 import {
   Donut,
   RankedBars,
@@ -25,14 +25,14 @@ import {
   StatTile,
   SliceTable,
 } from "@/components/analysis/primitives";
-import { REPORTED_SERIES, RETEST_COLOR, STATUS_COLOR } from "@/components/analysis/palette";
+import { RETEST_COLOR, STATUS_COLOR } from "@/components/analysis/palette";
 import {
   applyFilters,
   buildRows,
   componentBreakdown,
   componentMatrix,
+  clearedPeriods,
   EMPTY_FILTERS,
-  hasSolvedDates,
   kpis,
   MAX_TIMELINE_BUCKETS,
   RETEST_ORDER,
@@ -72,14 +72,24 @@ const weekdayOf = (iso: string): string => {
 
 const days = (n: number | null): string => (n === null ? "—" : `${n} d`);
 
-const solvedSubtitle = (
+/**
+ * Says what the bar is and what "finished" looks like, then how many periods
+ * are actually there yet — the headline the chart is drawn to deliver.
+ */
+const timelineSubtitle = (
   granularity: Granularity,
-  withSolved: boolean,
+  cleared: number,
+  total: number,
   truncated: boolean,
 ): string => {
-  const base = withSolved
-    ? `Per ${granularity}. Both series count tracker rows, so they share one axis.`
-    : `Per ${granularity}, on the date each row was raised. No row in this slice carries a Solved on date, so there is nothing to plot against it.`;
+  const base =
+    `Each bar is the rows raised in that ${granularity}, coloured by where they stand today — ` +
+    `so a bar with no WIP or Blocked left in it is a ${granularity} fully closed out. ` +
+    (total === 0
+      ? ""
+      : cleared === total
+        ? `All ${total} are clear.`
+        : `${cleared} of ${total} are clear.`);
   return truncated
     ? `${base} The range is longer than ${MAX_TIMELINE_BUCKETS} ${granularity}s, so only the most recent are drawn — switch the bucket to week or month for the whole span.`
     : base;
@@ -115,8 +125,8 @@ function AnalysisPage() {
 
   const stats = useMemo(() => kpis(rows), [rows]);
   const { points, truncated } = useMemo(() => timeline(rows, granularity), [rows, granularity]);
-  // Nothing in the sheet marks a fix date? Then there is no solved series to draw.
-  const withSolved = hasSolvedDates(points);
+  /** How many periods have nothing left open — the chart's headline. */
+  const cleared = useMemo(() => clearedPeriods(points), [points]);
   const breakdown = useMemo(
     () => componentBreakdown(rows, store.components),
     [rows, store.components],
@@ -435,19 +445,22 @@ function AnalysisPage() {
 
                   <Panel
                     className="lg:col-span-3"
-                    title={withSolved ? "Raised vs marked solved" : "Defects raised"}
-                    subtitle={solvedSubtitle(granularity, withSolved, truncated)}
-                    legend={
-                      withSolved ? <Legend items={REPORTED_SERIES.map(toLegend)} /> : undefined
-                    }
+                    title={`Raised per ${granularity}, and how much of it is done`}
+                    subtitle={timelineSubtitle(granularity, cleared, points.length, truncated)}
+                    legend={statusLegend}
                     table={
                       <SimpleTable
-                        head={[granularity, "Raised", "Solved"]}
-                        rows={points.map((p) => [p.label, p.reported, p.solved])}
+                        head={[granularity, "Raised", ...STATUS_ORDER, "Still open"]}
+                        rows={points.map((p) => [
+                          p.label,
+                          p.raised,
+                          ...STATUS_ORDER.map((st) => p.byStatus[st]),
+                          p.byStatus.WIP + p.byStatus.Blocked,
+                        ])}
                       />
                     }
                   >
-                    <ReportedVsSolved data={points} />
+                    <RaisedByStatus data={points} />
                   </Panel>
 
                   <Panel
@@ -493,19 +506,22 @@ function AnalysisPage() {
                 <TabsContent value="dates" className="mt-4 grid gap-4 lg:grid-cols-2">
                   <Panel
                     className="lg:col-span-2"
-                    title={withSolved ? "Raised vs marked solved" : "Defects raised"}
-                    subtitle={solvedSubtitle(granularity, withSolved, truncated)}
-                    legend={
-                      withSolved ? <Legend items={REPORTED_SERIES.map(toLegend)} /> : undefined
-                    }
+                    title={`Raised per ${granularity}, and how much of it is done`}
+                    subtitle={timelineSubtitle(granularity, cleared, points.length, truncated)}
+                    legend={statusLegend}
                     table={
                       <SimpleTable
-                        head={[granularity, "Raised", "Solved"]}
-                        rows={points.map((p) => [p.label, p.reported, p.solved])}
+                        head={[granularity, "Raised", ...STATUS_ORDER, "Still open"]}
+                        rows={points.map((p) => [
+                          p.label,
+                          p.raised,
+                          ...STATUS_ORDER.map((st) => p.byStatus[st]),
+                          p.byStatus.WIP + p.byStatus.Blocked,
+                        ])}
                       />
                     }
                   >
-                    <ReportedVsSolved data={points} />
+                    <RaisedByStatus data={points} />
                   </Panel>
 
                   <Panel
@@ -651,12 +667,6 @@ function AnalysisPage() {
     </main>
   );
 }
-
-const toLegend = (s: { name: string; color: string; mark: "rect" | "line" }) => ({
-  name: s.name,
-  color: s.color,
-  mark: s.mark,
-});
 
 const pct = (part: number, whole: number): string =>
   whole === 0 ? "—" : `${Math.round((part / whole) * 100)}%`;
