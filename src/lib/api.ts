@@ -19,20 +19,33 @@ export type Retest = (typeof RETESTS)[number];
 const configuredApiUrl = (import.meta.env["VITE_API_URL"] as string | undefined)?.trim();
 
 /**
- * Base URL of the defects API.
+ * Where a deployed build looks for the API when nothing overrides it.
  *
- * `VITE_API_URL` is baked in at build time, so on Vercel it has to be set in
- * the project's environment variables before the build. In dev it falls back to
- * `npm run dev` in Backend/; in a production build with nothing configured it
- * stays empty on purpose, so {@link request} can say exactly what is missing
- * rather than quietly trying to reach the developer's own laptop.
+ * A plain string in a source file on purpose. It is not a secret — the value is
+ * compiled into the client bundle, so the browser sees it either way — and a
+ * literal here is the one place guaranteed to survive the build. Vercel's Vite
+ * docs are explicit that reading a committed `.env` file "requires additional
+ * configuration", so a `.env.production` is not something the platform picks up
+ * on its own; depending on one is how this ended up unset in production twice.
+ *
+ * To point a deploy elsewhere, set `VITE_API_URL` in the host's environment
+ * variables — that still wins. Change this constant to move the default.
+ */
+const DEPLOYED_API_URL = "https://defect-code-mapping-voice-backend-production.up.railway.app";
+
+/**
+ * Base URL of the defects API, resolved at build time in this order:
+ *
+ *   1. `VITE_API_URL` from the host's environment (Vercel project settings)
+ *   2. `http://localhost:8787` during `vite dev`
+ *   3. {@link DEPLOYED_API_URL} for any other build
  */
 export const API_URL = (
   configuredApiUrl !== undefined && configuredApiUrl.length > 0
     ? configuredApiUrl
     : import.meta.env.DEV
       ? "http://localhost:8787"
-      : ""
+      : DEPLOYED_API_URL
 ).replace(/\/+$/, "");
 
 export type DefectRecord = {
@@ -159,18 +172,8 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  if (API_URL === "") {
-    throw new ApiError(
-      "VITE_API_URL is not set in this deployment, so there is no defects API to call. " +
-        "A .env file will not do it — .env is git-ignored, so it never reaches the host. " +
-        "Set VITE_API_URL in the hosting project's own environment variables " +
-        "(on Vercel: Project → Settings → Environment Variables) and redeploy, " +
-        "because the value is compiled into the bundle at build time.",
-      0,
-      "unconfigured",
-    );
-  }
-
+  // No "unset" case to handle: API_URL always resolves to a real host, falling
+  // back to DEPLOYED_API_URL rather than to the empty string.
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, init);

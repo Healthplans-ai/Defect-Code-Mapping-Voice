@@ -119,10 +119,9 @@ rows; past a few thousand, move the aggregation behind an API endpoint.
 - **Framework Preset**: Other. [`vercel.json`](vercel.json) supplies the
   install and build commands (`npm ci`, `npm run build`).
 - **Root Directory**: leave it at the repository root — this repo *is* the app.
-- **Environment Variables**: nothing to set — [`.env.production`](.env.production)
-  already carries `VITE_API_URL`. To point a deploy somewhere else, set
-  `VITE_API_URL` in Project → Settings → Environment Variables; a host variable
-  wins over the file.
+- **Environment Variables**: nothing to set — the deployed API URL is
+  compiled in from `src/lib/api.ts`. To point a deploy somewhere else, set
+  `VITE_API_URL` in Project → Settings → Environment Variables; it wins.
 
 [`vite.config.ts`](vite.config.ts) switches Nitro to its `vercel` preset when
 `VERCEL=1` is present, which emits the Build Output API v3 layout in
@@ -134,21 +133,28 @@ needs a redeploy**, not just a variable edit.
 
 ### Where the API URL comes from
 
-`VITE_API_URL` is a build-time value that ends up in the client bundle, so it is
-not a secret and lives in a committed file:
+`VITE_API_URL` is a build-time value compiled into the client bundle, so it is
+not a secret. It resolves in this order:
 
-| File | Committed? | Used by |
+| Order | Source | Applies to |
 | --- | --- | --- |
-| `.env.production` | yes | `vite build` — the deployed app |
-| `.env` | no, git-ignored | `vite dev` — your machine, pointing at localhost |
+| 1 | `VITE_API_URL` in the host's environment variables | any build that sets it |
+| 2 | `http://localhost:8787` | `vite dev` only |
+| 3 | `DEPLOYED_API_URL` in [`src/lib/api.ts`](src/lib/api.ts) | every other build |
 
-Vite loads `.env.production` only for production builds, so the two never
-collide: a deploy gets the Railway URL and `npm run dev` gets `localhost:8787`.
+The deployed default is a plain string in `src/lib/api.ts` rather than a
+`.env.production` file, and that is deliberate. Vercel's
+[Vite docs](https://vercel.com/docs/frameworks/frontend/vite#environment-variables)
+state that reading a committed `.env` file "requires additional configuration" —
+the platform does not pick one up on its own — so a `.env.production` looks like
+it should work and silently does not. A string literal in a source file always
+survives the build. Change that constant to move the default.
 
-A plain `.env` cannot configure a deploy on its own — it is git-ignored, so the
-host never receives it. Anything genuinely secret belongs in the host's
-environment variables, never in a committed file. Left unset in a production build,
-the app says exactly that instead of quietly trying to reach `localhost`.
+A git-ignored `.env` cannot configure a deploy at all: the host never receives
+it. It is for local development only. Note that Vite loads plain `.env` in every
+mode, so a local `npm run build` will bake in whatever your `.env` says — which
+is what you want for previewing locally, and irrelevant on Vercel, where no
+`.env` exists.
 
 ### Finish the loop
 

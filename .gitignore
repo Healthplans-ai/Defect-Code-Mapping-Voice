@@ -17,10 +17,10 @@ dist-ssr/
 
 # Local env — machine-specific overrides. Copy .env.example to .env.
 #
-# .env.production and .env.example are deliberately NOT ignored: neither holds a
-# secret, and .env.production is how the deployed build learns its API URL.
-# Anything genuinely secret belongs in the host's environment variables, never
-# in a committed file.
+# The deployed API URL is NOT here: it lives in src/lib/api.ts, because Vercel
+# does not read committed .env files without extra configuration. Anything
+# genuinely secret belongs in the host's environment variables, never in a
+# committed file.
 .env
 .env.local
 .env.*.local
