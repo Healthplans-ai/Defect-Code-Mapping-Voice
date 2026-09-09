@@ -59,6 +59,9 @@ export function DefectDialog({
     [all],
   );
 
+  /** Does any row here carry an actual retest verdict, or is it all the default? */
+  const hasRetestVerdicts = useMemo(() => all.some((d) => d.retest !== "Not retested"), [all]);
+
   const filtered = useMemo(
     () =>
       all.filter(
@@ -179,16 +182,23 @@ export function DefectDialog({
                 </Chip>
               ))}
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Chip active={retest === "All"} onClick={() => setRetest("All")}>
-                Any retest
-              </Chip>
-              {RETESTS.map((r) => (
-                <Chip key={r} active={retest === r} onClick={() => setRetest(r)}>
-                  {r}
+            {/*
+              Only worth offering when the rows disagree. With no Retest column
+              in the sheet every row is "Not retested", and a filter whose every
+              option but one returns nothing is just a dead control.
+            */}
+            {hasRetestVerdicts && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Chip active={retest === "All"} onClick={() => setRetest("All")}>
+                  Any retest
                 </Chip>
-              ))}
-            </div>
+                {RETESTS.map((r) => (
+                  <Chip key={r} active={retest === r} onClick={() => setRetest(r)}>
+                    {r}
+                  </Chip>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* List */}
@@ -227,14 +237,26 @@ export function DefectDialog({
                       {d.status}
                       {d.rawStatus && d.rawStatus !== d.status ? ` (“${d.rawStatus}”)` : ""}
                     </span>
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-xs font-semibold",
-                        retestStyles[d.retest],
-                      )}
-                    >
-                      {d.retest}
-                    </span>
+                    {/*
+                      "Not retested" is the absence of a verdict, not a verdict.
+                      A tracker with no Retest column would otherwise stamp it on
+                      every single row, which reads as a finding.
+                    */}
+                    {d.retest !== "Not retested" && (
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-xs font-semibold",
+                          retestStyles[d.retest],
+                        )}
+                      >
+                        {d.retest}
+                      </span>
+                    )}
+                    {d.phase && (
+                      <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
+                        {d.phase}
+                      </span>
+                    )}
                     {d.batch && d.batch !== "-" && (
                       <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
                         {d.batch}
@@ -253,17 +275,42 @@ export function DefectDialog({
                     {d.title}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {d.category || "uncategorised"}
-                    {d.alsoTouches ? ` · also touches ${d.alsoTouches}` : ""}
-                    {d.testedBy ? ` · tested by ${d.testedBy}` : ""}
+                    {[
+                      d.category || "uncategorised",
+                      d.alsoTouches ? `also touches ${d.alsoTouches}` : null,
+                      d.testType || null,
+                      d.testedBy ? `tested by ${d.testedBy}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </p>
 
-                  <p className="mt-3 rounded-lg bg-ink px-3 py-2 font-mono text-xs leading-relaxed text-ink-foreground">
-                    {d.code || "No code reference yet — add one in the Code References column."}
-                  </p>
+                  {/*
+                    Only shown when the row carries one. The tracker has no Code
+                    References column, and a placeholder telling the reader to
+                    fill in a column that does not exist is worse than silence.
+                  */}
+                  {d.code && (
+                    <p className="mt-3 rounded-lg bg-ink px-3 py-2 font-mono text-xs leading-relaxed text-ink-foreground">
+                      {d.code}
+                    </p>
+                  )}
 
-                  {(d.notes || d.notesOnResolution) && (
+                  {/* Every remaining column, labelled as the sheet labels it. */}
+                  {(d.solvedOn || d.testByTeamMembers || d.notes || d.notesOnResolution) && (
                     <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      {d.solvedOn && (
+                        <div>
+                          <dt className="inline font-semibold">Solved on: </dt>
+                          <dd className="inline">{fmt(d.solvedOn)}</dd>
+                        </div>
+                      )}
+                      {d.testByTeamMembers && (
+                        <div>
+                          <dt className="inline font-semibold">Test by team members: </dt>
+                          <dd className="inline">{d.testByTeamMembers}</dd>
+                        </div>
+                      )}
                       {d.notes && (
                         <div>
                           <dt className="inline font-semibold">Remark: </dt>
@@ -279,10 +326,13 @@ export function DefectDialog({
                     </dl>
                   )}
 
-                  <p className="mt-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-                    {d.confidence || "Unmapped"}
-                    {d.revision > 1 ? ` · rev ${d.revision}` : ""}
-                  </p>
+                  {(d.confidence || d.revision > 1) && (
+                    <p className="mt-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+                      {[d.confidence || null, d.revision > 1 ? `rev ${d.revision}` : null]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  )}
 
                   {editing === d.defectId && (
                     <MappingEditor
