@@ -1,4 +1,20 @@
-import type { Retest, Status } from "@/data/voiceAgent";
+/**
+ * The tracker's vocabulary, mirroring `Backend/src/types.ts`.
+ *
+ * These four-value unions are the contract, not data — the defect rows
+ * themselves live only in blob storage and arrive through an import.
+ */
+export const STATUSES = ["Done", "WIP", "Blocked", "No defect"] as const;
+export type Status = (typeof STATUSES)[number];
+
+/** Retest verdict — tracked separately from status. */
+export const RETESTS = [
+  "Resolved",
+  "Tested but Not Resolved",
+  "No defect",
+  "Not retested",
+] as const;
+export type Retest = (typeof RETESTS)[number];
 
 const configuredApiUrl = (import.meta.env["VITE_API_URL"] as string | undefined)?.trim();
 

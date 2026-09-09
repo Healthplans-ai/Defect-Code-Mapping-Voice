@@ -1,5 +1,4 @@
-import type { Retest, Status } from "@/data/voiceAgent";
-import type { ComponentView, DefectRecord } from "@/lib/api";
+import type { ComponentView, DefectRecord, Retest, Status } from "@/lib/api";
 
 /**
  * Aggregation for the /analysis page.

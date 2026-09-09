@@ -1,4 +1,4 @@
-import type { Retest, Status } from "@/data/voiceAgent";
+import type { Retest, Status } from "@/lib/api";
 import type { ConfidenceBucket } from "@/lib/analytics";
 
 /**

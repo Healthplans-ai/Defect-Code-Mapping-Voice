@@ -5,6 +5,7 @@ import { Download } from "lucide-react";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDefectStore } from "@/hooks/useDefectStore";
+import { StoreEmpty, StoreError, StoreLoading } from "@/components/StoreState";
 import { BandChart, BacklogChart, ReportedVsSolved } from "@/components/analysis/TimeCharts";
 import { ComponentStacks, DefectTable } from "@/components/analysis/Breakdowns";
 import { FilterBar } from "@/components/analysis/FilterBar";
@@ -91,7 +92,7 @@ const solvedSubtitle = (
 };
 
 function AnalysisPage() {
-  const { store, isFallback, isFetching, error, refetch } = useDefectStore();
+  const { store, hasData, isEmpty, isFetching, loadError, refetch } = useDefectStore();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [granularity, setGranularity] = useState<Granularity>("day");
   const [matrixDimension, setMatrixDimension] = useState<"status" | "retest">("status");
@@ -263,418 +264,431 @@ function AnalysisPage() {
               component split, the code hotspots and the row table all move together.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={exportCsv}
-            className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold transition-colors hover:border-primary hover:text-primary"
-          >
-            <Download className="size-4" />
-            Export slice as CSV
-          </button>
-        </div>
-
-        {error ? (
-          <div className="mt-6 rounded-2xl border border-destructive/40 bg-destructive/10 p-4">
-            <p className="font-display text-sm font-semibold text-destructive">
-              Analysing the bundled snapshot — the defect API is unreachable.
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">{error.message}</p>
+          {rows.length > 0 ? (
             <button
               type="button"
-              onClick={() => void refetch()}
-              className="mt-3 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold"
+              onClick={exportCsv}
+              className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold transition-colors hover:border-primary hover:text-primary"
             >
-              Retry
+              <Download className="size-4" />
+              Export slice as CSV
             </button>
+          ) : null}
+        </div>
+
+        {loadError ? (
+          <div className="mt-6 max-w-2xl">
+            <StoreError message={loadError.message} onRetry={() => void refetch()} />
           </div>
-        ) : null}
-
-        {/* One filter row, above everything it scopes. */}
-        <div className="mt-8">
-          <FilterBar
-            filters={filters}
-            onChange={setFilters}
-            granularity={granularity}
-            onGranularityChange={setGranularity}
-            components={store.components.map((c) => ({ id: c.id, name: c.name }))}
-            categories={categories}
-            span={span}
-            matched={rows.length}
-            total={allRows.length}
-          />
-        </div>
-
-        {/* Refetch holds the frame instead of flashing a skeleton. */}
-        <div
-          className="transition-opacity duration-200"
-          style={{ opacity: isFallback && isFetching ? 0.55 : 1 }}
-        >
-          <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            <StatTile
-              label="Rows in scope"
-              value={String(stats.total)}
-              hint={
-                stats.window.from === ""
-                  ? "no dated rows"
-                  : `${stats.window.from} → ${stats.window.to}`
-              }
+        ) : !hasData ? (
+          <div className="mt-6 max-w-2xl">
+            <StoreLoading label="Loading the defect store from Azure Blob…" />
+          </div>
+        ) : isEmpty ? (
+          <div className="mt-6">
+            <StoreEmpty
+              title="Nothing to analyse yet"
+              blurb="The store is live but holds no tracker rows, so there is nothing to slice. Upload the tracker sheet and every panel here fills in."
             />
-            <StatTile
-              label="Done"
-              value={pct(stats.done, stats.total)}
-              hint={`${stats.done} of ${stats.total} rows`}
-              tone="good"
-            />
-            <StatTile
-              label="Still open"
-              value={String(stats.open)}
-              hint={stats.blocked > 0 ? `${stats.blocked} blocked` : "none blocked"}
-              tone={stats.blocked > 0 ? "critical" : "warning"}
-            />
-            <StatTile
-              label="Retested & resolved"
-              value={pct(stats.resolved, stats.total)}
-              hint={`${stats.notRetested} never retested`}
-            />
-            <StatTile
-              label="Median time to fix"
-              value={days(stats.medianResolution)}
-              hint={
-                stats.measured === 0
-                  ? "no row carries both dates"
-                  : `p90 ${days(stats.p90Resolution)} · ${stats.measured} measured`
-              }
-            />
-            <StatTile
-              label="Code files touched"
-              value={String(stats.files)}
-              hint={`${stats.mapped} rows mapped · ${stats.unmapped} unmapped`}
-            />
-          </dl>
+          </div>
+        ) : (
+          <>
+            {/* One filter row, above everything it scopes. */}
+            <div className="mt-8">
+              <FilterBar
+                filters={filters}
+                onChange={setFilters}
+                granularity={granularity}
+                onGranularityChange={setGranularity}
+                components={store.components.map((c) => ({ id: c.id, name: c.name }))}
+                categories={categories}
+                span={span}
+                matched={rows.length}
+                total={allRows.length}
+              />
+            </div>
 
-          <Tabs defaultValue="overview" className="mt-8">
-            <TabsList className="h-auto flex-wrap justify-start">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="dates">Dates</TabsTrigger>
-              <TabsTrigger value="components">Components</TabsTrigger>
-              <TabsTrigger value="defects">Defects & code</TabsTrigger>
-              <TabsTrigger value="rows">Rows</TabsTrigger>
-            </TabsList>
-
-            {/* ---------------------------------------------------- overview */}
-            <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-3">
-              <Panel
-                className="lg:col-span-2"
-                title={withSolved ? "Raised vs marked solved" : "Defects raised"}
-                subtitle={solvedSubtitle(granularity, withSolved, truncated)}
-                legend={withSolved ? <Legend items={REPORTED_SERIES.map(toLegend)} /> : undefined}
-                table={
-                  <SimpleTable
-                    head={[granularity, "Raised", "Solved"]}
-                    rows={points.map((p) => [p.label, p.reported, p.solved])}
-                  />
-                }
-              >
-                <ReportedVsSolved data={points} />
-              </Panel>
-
-              <Panel
-                title="Status split"
-                subtitle="Lifecycle status as the tracker records it."
-                table={<SliceTable data={byStatus} label={"Status"} />}
-              >
-                <SplitBar data={byStatus} colors={STATUS_COLOR} />
-              </Panel>
-
-              <Panel
-                className="lg:col-span-2"
-                title="Defects per component"
-                subtitle="Click a component to filter the whole page to it."
-                legend={statusLegend}
-                table={
-                  <SimpleTable
-                    head={["Component", "Rows", "Open", "Resolved", "Verified"]}
-                    rows={breakdown.map((c) => [
-                      `${c.label} ${c.name}`,
-                      c.total,
-                      c.open,
-                      c.resolved,
-                      c.verified,
-                    ])}
-                  />
-                }
-              >
-                <ComponentStacks
-                  data={breakdown}
-                  onSelect={toggleComponent}
-                  selected={filters.componentIds}
-                />
-              </Panel>
-
-              <Panel
-                title="Retest verdict"
-                subtitle="Tracked separately from status."
-                table={<SliceTable data={byRetest} label={"Retest"} />}
-              >
-                <SplitBar data={byRetest} colors={RETEST_COLOR} />
-              </Panel>
-
-              <Panel
-                className="lg:col-span-3"
-                title="Defects by category"
-                subtitle="What kind of failure it was. Click a bar to filter."
-                table={<SliceTable data={byCategory} label={"Category"} />}
-              >
-                <BarList
-                  data={byCategory}
-                  total={stats.total}
-                  onSelect={toggleCategory}
-                  selected={filters.categories}
-                />
-              </Panel>
-            </TabsContent>
-
-            {/* ------------------------------------------------------- dates */}
-            <TabsContent value="dates" className="mt-4 grid gap-4 lg:grid-cols-2">
-              <Panel
-                className="lg:col-span-2"
-                title={withSolved ? "Raised vs marked solved" : "Defects raised"}
-                subtitle={solvedSubtitle(granularity, withSolved, truncated)}
-                legend={withSolved ? <Legend items={REPORTED_SERIES.map(toLegend)} /> : undefined}
-                table={
-                  <SimpleTable
-                    head={[granularity, "Raised", "Solved"]}
-                    rows={points.map((p) => [p.label, p.reported, p.solved])}
-                  />
-                }
-              >
-                <ReportedVsSolved data={points} />
-              </Panel>
-
-              <Panel
-                className="lg:col-span-2"
-                title="Backlog to date"
-                subtitle={
-                  withSolved
-                    ? "Running totals. The shaded band is what was still open at the end of each period."
-                    : "Running total of rows raised. With no Solved on dates in this slice the backlog and the raised total are the same line."
-                }
-                legend={withSolved ? <Legend items={BACKLOG_SERIES.map(toLegend)} /> : undefined}
-                table={
-                  <SimpleTable
-                    head={[granularity, "Raised to date", "Solved to date", "Open"]}
-                    rows={cumulative.map((p) => [
-                      p.label,
-                      p.cumulativeReported,
-                      p.cumulativeSolved,
-                      p.open,
-                    ])}
-                  />
-                }
-              >
-                <BacklogChart data={cumulative} />
-              </Panel>
-
-              {carries.solvedOn ? (
-                <Panel
-                  title="Time from raised to solved"
-                  subtitle={
-                    stats.measured === 0
-                      ? "Needs both a Date and a Solved on value — no row in this slice has both."
-                      : `${stats.measured} rows carry both dates · median ${days(stats.medianResolution)}, p90 ${days(stats.p90Resolution)}.`
+            {/* Refetch holds the frame instead of flashing a skeleton. */}
+            <div
+              className="transition-opacity duration-200"
+              style={{ opacity: isFetching ? 0.55 : 1 }}
+            >
+              <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+                <StatTile
+                  label="Rows in scope"
+                  value={String(stats.total)}
+                  hint={
+                    stats.window.from === ""
+                      ? "no dated rows"
+                      : `${stats.window.from} → ${stats.window.to}`
                   }
-                  table={<SliceTable data={resolution} label={"Band"} />}
-                >
-                  <BandChart data={resolution} unitLabel="rows" />
-                </Panel>
-              ) : null}
-
-              <Panel
-                className={carries.solvedOn ? undefined : "lg:col-span-2"}
-                title="Age of the open queue"
-                subtitle={`How long the ${stats.open} WIP and blocked rows have been open, counted from today.`}
-                table={<SliceTable data={ages} label={"Age"} />}
-              >
-                <BandChart data={ages} unitLabel="open rows" />
-              </Panel>
-
-              <Panel
-                className="lg:col-span-2"
-                title="Which weekday defects land on"
-                subtitle="Testing rhythm, not defect severity — useful for spotting the days a UAT round ran."
-                table={<SliceTable data={byWeekday} label={"Weekday"} />}
-              >
-                <BarList data={byWeekday} total={stats.total} />
-              </Panel>
-            </TabsContent>
-
-            {/* -------------------------------------------------- components */}
-            <TabsContent value="components" className="mt-4 grid gap-4 lg:grid-cols-2">
-              <Panel
-                className="lg:col-span-2"
-                title="Defects per component, by status"
-                subtitle="Sorted by row count. Click a component to filter the whole page to it."
-                legend={statusLegend}
-                table={
-                  <SimpleTable
-                    head={["Component", "Rows", ...STATUS_ORDER]}
-                    rows={breakdown.map((c) => [
-                      `${c.label} ${c.name}`,
-                      c.total,
-                      ...STATUS_ORDER.map((s) => c.byStatus[s]),
-                    ])}
-                  />
-                }
-              >
-                <ComponentStacks
-                  data={breakdown}
-                  onSelect={toggleComponent}
-                  selected={filters.componentIds}
                 />
-              </Panel>
-
-              <Panel
-                className="lg:col-span-2"
-                title={`Component × ${matrixDimension}`}
-                subtitle="Every cell prints its count, so the shading is a second read rather than the only one."
-                legend={
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <SequentialScaleLegend max={matrix.max} />
-                    <div className="flex gap-1">
-                      {(["status", "retest"] as const).map((d) => (
-                        <button
-                          key={d}
-                          type="button"
-                          onClick={() => setMatrixDimension(d)}
-                          aria-pressed={matrixDimension === d}
-                          className={
-                            matrixDimension === d
-                              ? "rounded-lg border border-primary bg-primary px-2.5 py-1 text-xs font-medium capitalize text-primary-foreground"
-                              : "rounded-lg border border-border px-2.5 py-1 text-xs font-medium capitalize text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-                          }
-                        >
-                          {d}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                }
-              >
-                <Heatmap columns={matrix.columns} rows={matrix.rows} max={matrix.max} />
-              </Panel>
-
-              {carries.alsoTouches ? (
-                <Panel
-                  title="Components a fix also touched"
-                  subtitle="From the Also Touches column — where a defect's blast radius crossed a boundary."
-                  table={<SliceTable data={alsoTouched} label={"Component"} />}
-                >
-                  <BarList data={alsoTouched} total={stats.total} />
-                </Panel>
-              ) : null}
-
-              <Panel
-                className={carries.alsoTouches ? undefined : "lg:col-span-2"}
-                title="Per-component detail"
-                subtitle="Open count, retest verdict and how much of the mapping is code-verified."
-              >
-                <SimpleTable
-                  head={["Component", "Rows", "Open", "Resolved", "Verified", "Median fix"]}
-                  rows={breakdown.map((c) => [
-                    `${c.label} ${c.name}`,
-                    c.total,
-                    c.open,
-                    c.resolved,
-                    c.verified,
-                    c.medianResolution === null ? "—" : `${c.medianResolution} d`,
-                  ])}
+                <StatTile
+                  label="Done"
+                  value={pct(stats.done, stats.total)}
+                  hint={`${stats.done} of ${stats.total} rows`}
+                  tone="good"
                 />
-              </Panel>
-            </TabsContent>
+                <StatTile
+                  label="Still open"
+                  value={String(stats.open)}
+                  hint={stats.blocked > 0 ? `${stats.blocked} blocked` : "none blocked"}
+                  tone={stats.blocked > 0 ? "critical" : "warning"}
+                />
+                <StatTile
+                  label="Retested & resolved"
+                  value={pct(stats.resolved, stats.total)}
+                  hint={`${stats.notRetested} never retested`}
+                />
+                <StatTile
+                  label="Median time to fix"
+                  value={days(stats.medianResolution)}
+                  hint={
+                    stats.measured === 0
+                      ? "no row carries both dates"
+                      : `p90 ${days(stats.p90Resolution)} · ${stats.measured} measured`
+                  }
+                />
+                <StatTile
+                  label="Code files touched"
+                  value={String(stats.files)}
+                  hint={`${stats.mapped} rows mapped · ${stats.unmapped} unmapped`}
+                />
+              </dl>
 
-            {/* ---------------------------------------------- defects & code */}
-            <TabsContent value="defects" className="mt-4 grid gap-4 lg:grid-cols-2">
-              {carries.files ? (
-                <Panel
-                  className="lg:col-span-2"
-                  title="Code hotspots"
-                  subtitle="Files named in the Code References column, counted by how many defects touched them."
-                  table={<SliceTable data={hotspots} label={"File"} />}
-                >
-                  <BarList data={hotspots} total={stats.total} monoLabels />
-                </Panel>
-              ) : null}
+              <Tabs defaultValue="overview" className="mt-8">
+                <TabsList className="h-auto flex-wrap justify-start">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="dates">Dates</TabsTrigger>
+                  <TabsTrigger value="components">Components</TabsTrigger>
+                  <TabsTrigger value="defects">Defects & code</TabsTrigger>
+                  <TabsTrigger value="rows">Rows</TabsTrigger>
+                </TabsList>
 
-              <Panel
-                title="Mapping confidence"
-                subtitle="Verified means the code carries the marker; inferred was read from the code plus the tracker note."
-                table={<SliceTable data={byConfidence} label={"Confidence"} />}
-              >
-                <SplitBar data={byConfidence} colors={CONFIDENCE_COLOR} />
-              </Panel>
+                {/* ---------------------------------------------------- overview */}
+                <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-3">
+                  <Panel
+                    className="lg:col-span-2"
+                    title={withSolved ? "Raised vs marked solved" : "Defects raised"}
+                    subtitle={solvedSubtitle(granularity, withSolved, truncated)}
+                    legend={
+                      withSolved ? <Legend items={REPORTED_SERIES.map(toLegend)} /> : undefined
+                    }
+                    table={
+                      <SimpleTable
+                        head={[granularity, "Raised", "Solved"]}
+                        rows={points.map((p) => [p.label, p.reported, p.solved])}
+                      />
+                    }
+                  >
+                    <ReportedVsSolved data={points} />
+                  </Panel>
 
-              {carries.batches ? (
-                <Panel
-                  title="Fix batches"
-                  subtitle="Which build carried the fix."
-                  table={<SliceTable data={batches} label={"Batch"} />}
-                >
-                  <BarList data={batches} total={stats.total} monoLabels />
-                </Panel>
-              ) : null}
+                  <Panel
+                    title="Status split"
+                    subtitle="Lifecycle status as the tracker records it."
+                    table={<SliceTable data={byStatus} label={"Status"} />}
+                  >
+                    <SplitBar data={byStatus} colors={STATUS_COLOR} />
+                  </Panel>
 
-              {carries.testedBy ? (
-                <Panel
-                  title="Who found it"
-                  subtitle="From the Tested By column."
-                  table={<SliceTable data={byTester} label={"Tester"} />}
-                >
-                  <BarList data={byTester} total={stats.total} />
-                </Panel>
-              ) : null}
+                  <Panel
+                    className="lg:col-span-2"
+                    title="Defects per component"
+                    subtitle="Click a component to filter the whole page to it."
+                    legend={statusLegend}
+                    table={
+                      <SimpleTable
+                        head={["Component", "Rows", "Open", "Resolved", "Verified"]}
+                        rows={breakdown.map((c) => [
+                          `${c.label} ${c.name}`,
+                          c.total,
+                          c.open,
+                          c.resolved,
+                          c.verified,
+                        ])}
+                      />
+                    }
+                  >
+                    <ComponentStacks
+                      data={breakdown}
+                      onSelect={toggleComponent}
+                      selected={filters.componentIds}
+                    />
+                  </Panel>
 
-              {carries.team ? (
-                <Panel
-                  title="Team"
-                  subtitle="From the Team column."
-                  table={<SliceTable data={byTeam} label={"Team"} />}
-                >
-                  <BarList data={byTeam} total={stats.total} />
-                </Panel>
-              ) : null}
+                  <Panel
+                    title="Retest verdict"
+                    subtitle="Tracked separately from status."
+                    table={<SliceTable data={byRetest} label={"Retest"} />}
+                  >
+                    <SplitBar data={byRetest} colors={RETEST_COLOR} />
+                  </Panel>
 
-              {carries.phase ? (
-                <Panel
-                  className="lg:col-span-2"
-                  title="Phase"
-                  subtitle="From the Phase column."
-                  table={<SliceTable data={byPhase} label={"Phase"} />}
-                >
-                  <BarList data={byPhase} total={stats.total} />
-                </Panel>
-              ) : null}
+                  <Panel
+                    className="lg:col-span-3"
+                    title="Defects by category"
+                    subtitle="What kind of failure it was. Click a bar to filter."
+                    table={<SliceTable data={byCategory} label={"Category"} />}
+                  >
+                    <BarList
+                      data={byCategory}
+                      total={stats.total}
+                      onSelect={toggleCategory}
+                      selected={filters.categories}
+                    />
+                  </Panel>
+                </TabsContent>
 
-              {missingColumns.length > 0 ? (
-                <p className="rounded-2xl border border-dashed border-border px-4 py-3 text-xs text-muted-foreground lg:col-span-2">
-                  No row in the store fills in{" "}
-                  <span className="font-medium text-foreground">{missingColumns.join(", ")}</span>,
-                  so the panels that read those columns are not shown. Add them to the tracker sheet
-                  and upload it again to light them up.
-                </p>
-              ) : null}
-            </TabsContent>
+                {/* ------------------------------------------------------- dates */}
+                <TabsContent value="dates" className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <Panel
+                    className="lg:col-span-2"
+                    title={withSolved ? "Raised vs marked solved" : "Defects raised"}
+                    subtitle={solvedSubtitle(granularity, withSolved, truncated)}
+                    legend={
+                      withSolved ? <Legend items={REPORTED_SERIES.map(toLegend)} /> : undefined
+                    }
+                    table={
+                      <SimpleTable
+                        head={[granularity, "Raised", "Solved"]}
+                        rows={points.map((p) => [p.label, p.reported, p.solved])}
+                      />
+                    }
+                  >
+                    <ReportedVsSolved data={points} />
+                  </Panel>
 
-            {/* -------------------------------------------------------- rows */}
-            <TabsContent value="rows" className="mt-4">
-              <Panel
-                title={`${rows.length} tracker rows in scope`}
-                subtitle="Sort by any column. Everything the charts above show is readable here."
-              >
-                <DefectTable rows={rows} />
-              </Panel>
-            </TabsContent>
-          </Tabs>
-        </div>
+                  <Panel
+                    className="lg:col-span-2"
+                    title="Backlog to date"
+                    subtitle={
+                      withSolved
+                        ? "Running totals. The shaded band is what was still open at the end of each period."
+                        : "Running total of rows raised. With no Solved on dates in this slice the backlog and the raised total are the same line."
+                    }
+                    legend={
+                      withSolved ? <Legend items={BACKLOG_SERIES.map(toLegend)} /> : undefined
+                    }
+                    table={
+                      <SimpleTable
+                        head={[granularity, "Raised to date", "Solved to date", "Open"]}
+                        rows={cumulative.map((p) => [
+                          p.label,
+                          p.cumulativeReported,
+                          p.cumulativeSolved,
+                          p.open,
+                        ])}
+                      />
+                    }
+                  >
+                    <BacklogChart data={cumulative} />
+                  </Panel>
+
+                  {carries.solvedOn ? (
+                    <Panel
+                      title="Time from raised to solved"
+                      subtitle={
+                        stats.measured === 0
+                          ? "Needs both a Date and a Solved on value — no row in this slice has both."
+                          : `${stats.measured} rows carry both dates · median ${days(stats.medianResolution)}, p90 ${days(stats.p90Resolution)}.`
+                      }
+                      table={<SliceTable data={resolution} label={"Band"} />}
+                    >
+                      <BandChart data={resolution} unitLabel="rows" />
+                    </Panel>
+                  ) : null}
+
+                  <Panel
+                    className={carries.solvedOn ? undefined : "lg:col-span-2"}
+                    title="Age of the open queue"
+                    subtitle={`How long the ${stats.open} WIP and blocked rows have been open, counted from today.`}
+                    table={<SliceTable data={ages} label={"Age"} />}
+                  >
+                    <BandChart data={ages} unitLabel="open rows" />
+                  </Panel>
+
+                  <Panel
+                    className="lg:col-span-2"
+                    title="Which weekday defects land on"
+                    subtitle="Testing rhythm, not defect severity — useful for spotting the days a UAT round ran."
+                    table={<SliceTable data={byWeekday} label={"Weekday"} />}
+                  >
+                    <BarList data={byWeekday} total={stats.total} />
+                  </Panel>
+                </TabsContent>
+
+                {/* -------------------------------------------------- components */}
+                <TabsContent value="components" className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <Panel
+                    className="lg:col-span-2"
+                    title="Defects per component, by status"
+                    subtitle="Sorted by row count. Click a component to filter the whole page to it."
+                    legend={statusLegend}
+                    table={
+                      <SimpleTable
+                        head={["Component", "Rows", ...STATUS_ORDER]}
+                        rows={breakdown.map((c) => [
+                          `${c.label} ${c.name}`,
+                          c.total,
+                          ...STATUS_ORDER.map((s) => c.byStatus[s]),
+                        ])}
+                      />
+                    }
+                  >
+                    <ComponentStacks
+                      data={breakdown}
+                      onSelect={toggleComponent}
+                      selected={filters.componentIds}
+                    />
+                  </Panel>
+
+                  <Panel
+                    className="lg:col-span-2"
+                    title={`Component × ${matrixDimension}`}
+                    subtitle="Every cell prints its count, so the shading is a second read rather than the only one."
+                    legend={
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <SequentialScaleLegend max={matrix.max} />
+                        <div className="flex gap-1">
+                          {(["status", "retest"] as const).map((d) => (
+                            <button
+                              key={d}
+                              type="button"
+                              onClick={() => setMatrixDimension(d)}
+                              aria-pressed={matrixDimension === d}
+                              className={
+                                matrixDimension === d
+                                  ? "rounded-lg border border-primary bg-primary px-2.5 py-1 text-xs font-medium capitalize text-primary-foreground"
+                                  : "rounded-lg border border-border px-2.5 py-1 text-xs font-medium capitalize text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                              }
+                            >
+                              {d}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    }
+                  >
+                    <Heatmap columns={matrix.columns} rows={matrix.rows} max={matrix.max} />
+                  </Panel>
+
+                  {carries.alsoTouches ? (
+                    <Panel
+                      title="Components a fix also touched"
+                      subtitle="From the Also Touches column — where a defect's blast radius crossed a boundary."
+                      table={<SliceTable data={alsoTouched} label={"Component"} />}
+                    >
+                      <BarList data={alsoTouched} total={stats.total} />
+                    </Panel>
+                  ) : null}
+
+                  <Panel
+                    className={carries.alsoTouches ? undefined : "lg:col-span-2"}
+                    title="Per-component detail"
+                    subtitle="Open count, retest verdict and how much of the mapping is code-verified."
+                  >
+                    <SimpleTable
+                      head={["Component", "Rows", "Open", "Resolved", "Verified", "Median fix"]}
+                      rows={breakdown.map((c) => [
+                        `${c.label} ${c.name}`,
+                        c.total,
+                        c.open,
+                        c.resolved,
+                        c.verified,
+                        c.medianResolution === null ? "—" : `${c.medianResolution} d`,
+                      ])}
+                    />
+                  </Panel>
+                </TabsContent>
+
+                {/* ---------------------------------------------- defects & code */}
+                <TabsContent value="defects" className="mt-4 grid gap-4 lg:grid-cols-2">
+                  {carries.files ? (
+                    <Panel
+                      className="lg:col-span-2"
+                      title="Code hotspots"
+                      subtitle="Files named in the Code References column, counted by how many defects touched them."
+                      table={<SliceTable data={hotspots} label={"File"} />}
+                    >
+                      <BarList data={hotspots} total={stats.total} monoLabels />
+                    </Panel>
+                  ) : null}
+
+                  <Panel
+                    title="Mapping confidence"
+                    subtitle="Verified means the code carries the marker; inferred was read from the code plus the tracker note."
+                    table={<SliceTable data={byConfidence} label={"Confidence"} />}
+                  >
+                    <SplitBar data={byConfidence} colors={CONFIDENCE_COLOR} />
+                  </Panel>
+
+                  {carries.batches ? (
+                    <Panel
+                      title="Fix batches"
+                      subtitle="Which build carried the fix."
+                      table={<SliceTable data={batches} label={"Batch"} />}
+                    >
+                      <BarList data={batches} total={stats.total} monoLabels />
+                    </Panel>
+                  ) : null}
+
+                  {carries.testedBy ? (
+                    <Panel
+                      title="Who found it"
+                      subtitle="From the Tested By column."
+                      table={<SliceTable data={byTester} label={"Tester"} />}
+                    >
+                      <BarList data={byTester} total={stats.total} />
+                    </Panel>
+                  ) : null}
+
+                  {carries.team ? (
+                    <Panel
+                      title="Team"
+                      subtitle="From the Team column."
+                      table={<SliceTable data={byTeam} label={"Team"} />}
+                    >
+                      <BarList data={byTeam} total={stats.total} />
+                    </Panel>
+                  ) : null}
+
+                  {carries.phase ? (
+                    <Panel
+                      className="lg:col-span-2"
+                      title="Phase"
+                      subtitle="From the Phase column."
+                      table={<SliceTable data={byPhase} label={"Phase"} />}
+                    >
+                      <BarList data={byPhase} total={stats.total} />
+                    </Panel>
+                  ) : null}
+
+                  {missingColumns.length > 0 ? (
+                    <p className="rounded-2xl border border-dashed border-border px-4 py-3 text-xs text-muted-foreground lg:col-span-2">
+                      No row in the store fills in{" "}
+                      <span className="font-medium text-foreground">
+                        {missingColumns.join(", ")}
+                      </span>
+                      , so the panels that read those columns are not shown. Add them to the tracker
+                      sheet and upload it again to light them up.
+                    </p>
+                  ) : null}
+                </TabsContent>
+
+                {/* -------------------------------------------------------- rows */}
+                <TabsContent value="rows" className="mt-4">
+                  <Panel
+                    title={`${rows.length} tracker rows in scope`}
+                    subtitle="Sort by any column. Everything the charts above show is readable here."
+                  >
+                    <DefectTable rows={rows} />
+                  </Panel>
+                </TabsContent>
+              </Tabs>
+            </div>
+          </>
+        )}
       </section>
 
       <footer className="mt-12 bg-ink py-10 text-ink-foreground">

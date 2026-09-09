@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pipeline } from "@/components/Pipeline";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useDefectStore } from "@/hooks/useDefectStore";
+import { StoreEmpty, StoreError, StoreLoading } from "@/components/StoreState";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -27,7 +28,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const { store, isFallback, isFetching, error, refetch } = useDefectStore();
+  const { store, hasData, isEmpty, isLoading, loadError, refetch } = useDefectStore();
   const { components, summary } = store;
 
   const stats = [
@@ -77,28 +78,20 @@ function Index() {
             that flow and pins every tracked defect to the component that owns it.
           </p>
 
-          {error ? (
-            <div className="rise mt-8 max-w-2xl rounded-2xl border border-destructive/40 bg-destructive/10 p-4">
-              <p className="font-display text-sm font-semibold text-destructive">
-                Showing the bundled snapshot — the defect API is unreachable.
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">{error.message}</p>
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                className="mt-3 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold"
-              >
-                Retry
-              </button>
+          {loadError ? (
+            <div className="rise mt-8 max-w-2xl">
+              <StoreError message={loadError.message} onRetry={() => void refetch()} />
             </div>
           ) : (
             <p
               className="rise mt-6 text-xs text-muted-foreground"
               style={{ animationDelay: "260ms" }}
             >
-              {isFallback && isFetching
+              {!hasData
                 ? "Loading the live store from Azure Blob…"
-                : `Live from Azure Blob · ${summary.rows} · updated ${fmtStamp(store.updatedAt)}`}
+                : isEmpty
+                  ? "Live from Azure Blob · no tracker rows imported yet"
+                  : `Live from Azure Blob · ${summary.rows} · updated ${fmtStamp(store.updatedAt)}`}
               {lastImport
                 ? ` · last import ${lastImport.fileName} (+${lastImport.totals.new} new, ${lastImport.totals.updated} updated)`
                 : ""}
@@ -161,68 +154,84 @@ function Index() {
           <h2 className="mt-2 font-display text-3xl font-bold sm:text-4xl">
             Where the defects landed
           </h2>
-          <p className="mt-2 max-w-2xl text-muted-foreground">
-            {summary.total} tracker rows mapped to the component whose code actually changed:{" "}
-            {summary.done} done, {summary.wip} in progress, {summary.blocked} blocked and{" "}
-            {summary.noDefect} closed as “no defect — working”. {summary.resolved} have been
-            retested and resolved.
-            {summary.unmapped > 0 ? (
-              <>
-                {" "}
-                <span className="font-semibold text-foreground">
-                  {summary.unmapped} row{summary.unmapped === 1 ? "" : "s"} carry no component yet
-                </span>{" "}
-                — open the Unmapped card to assign them.
-              </>
-            ) : null}
-          </p>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {owning.map((c, i) => {
-              const max = owning[0]!.defects.length;
-              return (
-                <div
-                  key={c.id}
-                  className="rise rounded-2xl border border-border bg-card p-5"
-                  style={{ animationDelay: `${i * 90}ms`, boxShadow: "var(--shadow-card)" }}
-                >
-                  <div className="flex items-baseline justify-between">
-                    <span className="font-display text-sm font-semibold">
-                      {c.id === 0 ? "" : c.id} {c.name}
-                    </span>
-                    <span className="font-display text-2xl font-bold text-primary">
-                      {c.defects.length}
-                    </span>
-                  </div>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+          {!hasData && !loadError ? (
+            <div className="mt-6 max-w-2xl">
+              <StoreLoading />
+            </div>
+          ) : isEmpty ? (
+            <div className="mt-6">
+              <StoreEmpty />
+            </div>
+          ) : (
+            <>
+              <p className="mt-2 max-w-2xl text-muted-foreground">
+                {summary.total} tracker rows mapped to the component whose code actually changed:{" "}
+                {summary.done} done, {summary.wip} in progress, {summary.blocked} blocked and{" "}
+                {summary.noDefect} closed as “no defect — working”. {summary.resolved} have been
+                retested and resolved.
+                {summary.unmapped > 0 ? (
+                  <>
+                    {" "}
+                    <span className="font-semibold text-foreground">
+                      {summary.unmapped} row{summary.unmapped === 1 ? "" : "s"} carry no component
+                      yet
+                    </span>{" "}
+                    — open the Unmapped card to assign them.
+                  </>
+                ) : null}
+              </p>
+
+              <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {owning.map((c, i) => {
+                  const max = owning[0]!.defects.length;
+                  return (
                     <div
-                      className="h-full rounded-full bg-accent transition-all duration-1000"
-                      style={{ width: `${(c.defects.length / max) * 100}%` }}
-                    />
-                  </div>
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    {c.defects
-                      .slice(0, 8)
-                      .map((d) => d.label)
-                      .join(" · ")}
-                    {c.defects.length > 8 ? ` · +${c.defects.length - 8} more` : ""}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Object.entries(summary.byCategory).map(([cat, n]) => (
-              <div
-                key={cat}
-                className="rounded-2xl border border-border bg-background p-4 text-center"
-              >
-                <p className="font-display text-3xl font-bold">{n}</p>
-                <p className="mt-1 text-xs uppercase tracking-wider text-muted-foreground">{cat}</p>
+                      key={c.id}
+                      className="rise rounded-2xl border border-border bg-card p-5"
+                      style={{ animationDelay: `${i * 90}ms`, boxShadow: "var(--shadow-card)" }}
+                    >
+                      <div className="flex items-baseline justify-between">
+                        <span className="font-display text-sm font-semibold">
+                          {c.id === 0 ? "" : c.id} {c.name}
+                        </span>
+                        <span className="font-display text-2xl font-bold text-primary">
+                          {c.defects.length}
+                        </span>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-accent transition-all duration-1000"
+                          style={{ width: `${(c.defects.length / max) * 100}%` }}
+                        />
+                      </div>
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        {c.defects
+                          .slice(0, 8)
+                          .map((d) => d.label)
+                          .join(" · ")}
+                        {c.defects.length > 8 ? ` · +${c.defects.length - 8} more` : ""}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+
+              <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {Object.entries(summary.byCategory).map(([cat, n]) => (
+                  <div
+                    key={cat}
+                    className="rounded-2xl border border-border bg-background p-4 text-center"
+                  >
+                    <p className="font-display text-3xl font-bold">{n}</p>
+                    <p className="mt-1 text-xs uppercase tracking-wider text-muted-foreground">
+                      {cat}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </section>
 

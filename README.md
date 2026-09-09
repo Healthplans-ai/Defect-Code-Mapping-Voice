@@ -36,8 +36,13 @@ Copy `.env.example` to `.env` first; it points `VITE_API_URL` at
 ## What is in it
 
 Point the app at a different API with `VITE_API_URL` in `.env` (default
-`http://localhost:8787`). If the API is unreachable the page falls back to the
-bundled snapshot in `src/data/voiceAgent.ts` and says so.
+`http://localhost:8787`).
+
+**No defect is hardcoded here.** Every row is read from the backend, which
+reads blob storage, which is populated by uploads — there is no bundled
+snapshot to fall back on. So each page distinguishes three situations and says
+which one it is: the API is unreachable, the store is live but empty (nothing
+imported yet), or here is the data.
 
 | Route | What it does |
 | --- | --- |
@@ -48,7 +53,11 @@ bundled snapshot in `src/data/voiceAgent.ts` and says so.
 Relevant files:
 
 - `src/lib/api.ts` — typed client for the defects API
-- `src/hooks/useDefectStore.ts` — react-query hook + the offline fallback
+- `src/hooks/useDefectStore.ts` — react-query hook. Exposes `hasData`,
+  `isEmpty` and a `loadError` that folds in react-query's *paused* state, so a
+  browser that believes it is offline gets "unreachable" instead of a spinner
+  that never resolves.
+- `src/components/StoreState.tsx` — the loading / error / empty panels
 - `src/lib/analytics.ts` — every metric on `/analysis`, as pure functions over
   the store's rows. No React in here; charts get already-aggregated data.
 - `src/components/analysis/` — the panels. `palette.ts` holds the colour
@@ -131,13 +140,14 @@ Once Vercel gives you the production domain, add it to the backend service's
 https://<your-app>.vercel.app,https://*.vercel.app
 ```
 
-Until you do, the browser blocks every request and the pages fall back to the
-bundled snapshot with an "API is unreachable" banner. The wildcard entry is
-what makes preview deployments work without listing each generated hostname.
+Until you do, the browser blocks every request and every page shows "the
+defect store could not be read". The wildcard entry is what makes preview
+deployments work without listing each generated hostname.
 
 ### Verifying a deploy
 
-- **`/`** — says "Live from Azure Blob", not "Showing the bundled snapshot".
+- **`/`** — says "Live from Azure Blob", and the row count is not zero
+  (zero means the store is reachable but nothing has been imported).
 - **`/analysis`** — the row count in the filter bar matches the store.
 - **`/import`** — "Download current data as .xlsx" returns a workbook. This is
   the real end-to-end test: a cross-origin request that streams a file back.

@@ -9,8 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { statuses, retests } from "@/data/voiceAgent";
-import type { Retest, Status } from "@/data/voiceAgent";
+import { RETESTS, STATUSES, type Retest, type Status } from "@/lib/api";
 import { patchDefect, type ComponentView, type DefectRecord } from "@/lib/api";
 import { DEFECT_STORE_KEY } from "@/hooks/useDefectStore";
 
@@ -118,7 +117,7 @@ export function DefectDialog({
 
           <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Stat label="Total" value={filtered.length} highlight />
-            {statuses.map((s) => (
+            {STATUSES.map((s) => (
               <Stat key={s} label={s} value={counts[s] ?? 0} />
             ))}
           </div>
@@ -174,7 +173,7 @@ export function DefectDialog({
               <Chip active={status === "All"} onClick={() => setStatus("All")}>
                 All statuses
               </Chip>
-              {statuses.map((s) => (
+              {STATUSES.map((s) => (
                 <Chip key={s} active={status === s} onClick={() => setStatus(s)}>
                   {s}
                 </Chip>
@@ -184,7 +183,7 @@ export function DefectDialog({
               <Chip active={retest === "All"} onClick={() => setRetest("All")}>
                 Any retest
               </Chip>
-              {retests.map((r) => (
+              {RETESTS.map((r) => (
                 <Chip key={r} active={retest === r} onClick={() => setRetest(r)}>
                   {r}
                 </Chip>
@@ -367,7 +366,7 @@ function MappingEditor({
           onChange={(e) => setRetestValue(e.target.value as Retest)}
           className="rounded-lg border border-input bg-background px-2 py-1.5 text-sm text-foreground"
         >
-          {retests.map((r) => (
+          {RETESTS.map((r) => (
             <option key={r} value={r}>
               {r}
             </option>

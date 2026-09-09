@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { Status } from "@/data/voiceAgent";
+import type { Status } from "@/lib/api";
 import { STATUS_ORDER, UNMAPPED_KEY, type ComponentBreakdown, type Row } from "@/lib/analytics";
 import { STATUS_COLOR } from "@/components/analysis/palette";
 import { Empty } from "@/components/analysis/primitives";

@@ -2,7 +2,7 @@ import { Check, ChevronDown, RotateCcw, Search } from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import type { Retest, Status } from "@/data/voiceAgent";
+import type { Retest, Status } from "@/lib/api";
 import {
   CONFIDENCE_ORDER,
   EMPTY_FILTERS,
