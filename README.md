@@ -119,8 +119,10 @@ rows; past a few thousand, move the aggregation behind an API endpoint.
 - **Framework Preset**: Other. [`vercel.json`](vercel.json) supplies the
   install and build commands (`npm ci`, `npm run build`).
 - **Root Directory**: leave it at the repository root — this repo *is* the app.
-- **Environment Variables**: `VITE_API_URL` = the backend's public URL, no
-  trailing slash. Set it for Production, Preview and Development.
+- **Environment Variables**: nothing to set — [`.env.production`](.env.production)
+  already carries `VITE_API_URL`. To point a deploy somewhere else, set
+  `VITE_API_URL` in Project → Settings → Environment Variables; a host variable
+  wins over the file.
 
 [`vite.config.ts`](vite.config.ts) switches Nitro to its `vercel` preset when
 `VERCEL=1` is present, which emits the Build Output API v3 layout in
@@ -128,7 +130,24 @@ rows; past a few thousand, move the aggregation behind an API endpoint.
 consumes that directly, so there is no output directory to configure.
 
 `VITE_API_URL` is compiled into the bundle at build time, so **changing it
-needs a redeploy**, not just a variable edit. Left unset in a production build,
+needs a redeploy**, not just a variable edit.
+
+### Where the API URL comes from
+
+`VITE_API_URL` is a build-time value that ends up in the client bundle, so it is
+not a secret and lives in a committed file:
+
+| File | Committed? | Used by |
+| --- | --- | --- |
+| `.env.production` | yes | `vite build` — the deployed app |
+| `.env` | no, git-ignored | `vite dev` — your machine, pointing at localhost |
+
+Vite loads `.env.production` only for production builds, so the two never
+collide: a deploy gets the Railway URL and `npm run dev` gets `localhost:8787`.
+
+A plain `.env` cannot configure a deploy on its own — it is git-ignored, so the
+host never receives it. Anything genuinely secret belongs in the host's
+environment variables, never in a committed file. Left unset in a production build,
 the app says exactly that instead of quietly trying to reach `localhost`.
 
 ### Finish the loop
